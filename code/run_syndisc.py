@@ -39,25 +39,27 @@ def run_syndisc(d):
             if not np.allclose(cur,d['data']['syn_upper'][-1]):
                 print("ALERT syn_upper not the same (i.e. pX not the same)")
         else:
-            p_XY.generate_dirichlet_joint_probabilities()
-            # p_XY.generate_uniform_joint_probabilities(tot_vars,args['states'])
+            if args['dist_type'] == 'dirichlet' or args['dist_type'] == 'random':
+                p_XY.generate_dirichlet_joint_probabilities()
+            else:
+                p_XY.generate_uniform_joint_probabilities(tot_vars,args['states'])
             d['data']['syn_upper'].append(synergistic_entropy_upper_bound(p_XY[variables_X]))
 
         d['data']['parXY'].append(list(matrix2params_incremental(p_XY)))
 
         # (time) calculation of self-synergy
-        dit_selfsyn = Distribution.from_ndarray(p_XY[variables_X].joint_probabilities.joint_probabilities)
-        before = time.time()
-        syn, probs = self_disclosure_channel(dit_selfsyn)
-        d['data']['tot_runtime'].append(time.time()-before)
+        dit_syn = Distribution.from_ndarray(p_XY.joint_probabilities.joint_probabilities)
+        if args['lenY'] == 0:
+            before = time.time()
+            syn, probs = self_disclosure_channel(dit_syn)
+            d['data']['tot_runtime'].append(time.time()-before)
+        else:
+            # (time) calculation of synergy
+            before = time.time()
+            syn, probs = disclosure_channel(dit_syn)
+            d['data']['tot_runtime'].append(time.time()-before)
 
-        # # (time) calculation of synergy
-        # dit_syn = Distribution.from_ndarray(p_XY.joint_probabilities.joint_probabilities)
-        # before = time.time()
-        # syn, probs = disclosure_channel(dit_syn)
-        # d['data']['tot_runtime'].append(time.time()-before)
-
-        d['data']['I(Y;S)'].append([syn])
+        d['data']['I(Y;S)'].append([syn]) # if lenY=0 then I(Y;S)=I(X;S)
 
         # calculate I(Xi;SRV) for all Xi
         x = p_XY[variables_X].joint_probabilities.joint_probabilities.flatten()
@@ -65,28 +67,21 @@ def run_syndisc(d):
         pXS = np.reshape((x*vgx).T, [args['states']]*args['lenX']+[len(x*vgx)])
 
         dit_XS = Distribution.from_ndarray(pXS)
-        # print(dit_XS)
         synvars = list(range(len(variables_X),len(dit_XS.rvs)))
         try:
+            tot_mi = dit.shannon.mutual_information(dit_XS,variables_X,synvars)
             indiv_mutuals = [dit.shannon.mutual_information(dit_XS,[i],synvars) for i in variables_X]
             srv_entropy = dit.shannon.entropy(dit_XS,synvars)
         except AssertionError:
             print('Too large difference prob distributions ')
             indiv_mutuals = [-1 for _ in variables_X]
-            srv_entropy = 0
+            srv_entropy = -1
+            tot_mi = -1
 
-        d['data']['H(S)'].append(srv_entropy)
+        d['data']['I(X;S)'].append(tot_mi) # should be equal to I(X;S) if lenY = 0
         d['data']['I(Xi;S)'].append(indiv_mutuals)
+        d['data']['H(S)'].append(srv_entropy)
         d['data']['pXS'].append(list(pXS.flatten()))
-
-        ## Save each calculated synergy in seperate file
-        # row_name = "/"
-        # for nk in name_keys:
-        #     row_name += nk + str(args[nk]) + "_"
-        # row_name += time.strftime("%Y%m%d-%H%M%S")+".json" # add timestamp
-
-        # with open("./experiments/"+args['folder']+args['rowfolder']+row_name,'w') as fp:
-        #     json.dump(row_data,fp)
         
     d['args'] = args
     return d
@@ -116,7 +111,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     d = {'args':[],'data':{'systemID':[], 'parXY':[],'syn_upper':[],'runID':[],
-            'pXS':[],'H(S)':[],'I(Y;S)':[],'I(Xi;S)':[],'tot_runtime':[]}}
+            'pXS':[],'H(S)':[],'I(X;S)':[],'I(Y;S)':[],'I(Xi;S)':[],'tot_runtime':[]}}
     d['args'] = args
     d = run_syndisc(d)
 
@@ -128,35 +123,6 @@ if __name__ == '__main__':
         while any(filename_beg+str(args.exp)+filename_end in x for x in files):
             args.exp += 1
         filename = filename_beg+str(args.exp)+filename_end
+        print(d['args']['folder']+filename)
         with open(d['args']['folder']+filename,'w') as fp:
             json.dump(d,fp)
-
-    #  if args.plot_df:
-    #       from helpers.load_helpers import get_best, get_data, swithcols
-    #       c1 = int(args.c1recalcs)
-    #       c2 = int(args.c2recalcs)
-    #       if args.code1 != "''" and args.code2 != "''":
-    #            last = len(system_strings)*(((1+c1)*len(strings1))\
-    #                                          +((1+c2)*len(strings2)))
-    #       elif args.code1!="''":
-    #            last = len(system_strings)*((1+c1)*len(strings1))
-    #       elif args.code2!="''":
-    #            last = len(system_strings)*((1+c2)*len(strings1))
-    #       else:
-    #            last = 0
-
-    #       d = get_data(args,last)
-          
-    #       # get path lengths of SRV's optimization path
-    #       d = swithcols(['systemID','runID','syn_info','tot_runtime','exp_sort','multi','no_test','tot_repeats'],d)
-    #       # d = get_best(d) # best srvs of multiple runs for a joint pdf Pr(X,Y)
-    #       curtime = time.strftime("%Y%m%d-%H%M%S")
-    #       filename = args.folder+'exp'+str(args.exp)+'states'+str(args.states)+curtime+'.pkl'
-    #       d.to_pickle(filename)
-    #       print(d.explode('all_initials'))
-
-    #  if args.plot:
-    #       d = pd.read_pickle(filename)     
-    #       fig, ax = plt.subplots(figsize=(14,8))        
-    #       sns.scatterplot(data=d, x='tot_runtime', y='syn_info', hue='systemID',style='multi',palette='tab10',s=100,ax=ax)
-    #       plt.show()

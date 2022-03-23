@@ -1,73 +1,18 @@
-import argparse
-import seaborn as sns
+import os
 import sys
 import glob
+import argparse
+import matplotlib.pyplot as plt
+import seaborn as sns
 import numpy as np
 import seaborn as sns
 import pandas as pd
-import matplotlib.pyplot as plt
-import os
 from distutils.util import strtobool
 from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix
-from jointpdfpython3.params_matrix import params2matrix_incremental
-
-from helpers.helpers import load_files
-from helpers.landscape_helpers import cost_func_landscape,plot_2D,plot_plane
-
-def swithcols(front,curfile):
-    # brings list of 'front' columns to the front of file
-    cols = curfile.columns.tolist()
-    for f in front:
-        cols.pop(cols.index(f))
-    cols = front+cols
-    return curfile[cols]
-
-# return two orthogonal unit vectors
-def random_orthogonal_unit_vectors(dim):
-    v1 = np.random.rand(dim)
-    v1 = v1/np.linalg.norm(v1)
-    v2 = np.random.rand(dim)
-    v2 -= v2.dot(v1) * v1
-    v2 = v2/np.linalg.norm(v2)
-    return v1, v2
-
-def get_plane_points(v1,v2,mag=1,steps=10):
-    mag = 1
-    dim = len(v1)
-    mid = [0.5 for _ in range(dim)]
-    v3 = (v1*mag)
-    v4 = (v2*mag)
-
-    # get plane given random orthogonal unit vectors
-    plane1 = np.linspace(mid - (0.5*v3),mid + (0.5*v3),steps)
-    plane2 = np.linspace(mid - (0.5*v4),mid + (0.5*v4),steps)
-
-    plane = []
-    for p1 in plane1:
-        for p2 in plane2:
-            plane.append(p1+(p2-mid))
-    return np.array(plane)
-
-def get_plane_values(args,curdf,plane,parX):
-    steps=args.steps
-    subjects = list(range(args.lenX))
-    syn_upper = float(curdf['syn_upper'])
-    print(syn_upper)
-    Z = []
-    for i in range(steps):
-        Z.append([])
-        for j in range(steps):
-            plane_id = (steps*i)+j
-            curparams = parX+list(plane[plane_id])
-
-            # get cost of curparams
-            Z[-1].append(get_cost(args,parX,list(plane[plane_id]),subjects,syn_upper))
-    Z=np.array(Z)
-    return Z
-
-def get_cost(args,parX,curparams,subjects,syn_upper):
-    jXS = JointProbabilityMatrix(args.lenX+1,args.states)
-    return cost_func_landscape(jXS,parX,curparams,subjects,syn_upper)
+from jointpdfpython3.params_matrix import matrix2params_incremental
+from jointpdfpython3.toy_functions import append_synergistic_variables,append_variables_with_target_mi
+from jointpdfpython3.measures import synergistic_information, synergistic_entropy_upper_bound
+from helpers.planes import plot_2D,random_orthogonal_unit_vectors,get_plane_points,get_plane_values,plot_plane
 
 ###############################################################
 #                          MAIN
@@ -76,7 +21,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='plot computed Isyns of a random/PCA plane of parameters')
 
     # model parameters
-    parser.add_argument('--steps', default=10,type=int, help='Number of points on each axis on 2D PCA grid')
+    parser.add_argument('--steps', default=20,type=int, help='Number of points on each axis on 2D PCA grid')
     parser.add_argument('--mag', default=1,type=float, help='Magnitude of random orthogonal vectors')
     parser.add_argument('--plot_func', default='contour', help='Type of plot of 2D plane')
     parser.add_argument('--PCA', default=False,type=lambda x: bool(strtobool(x)), help='If no, then random points')
@@ -88,49 +33,69 @@ if __name__ == '__main__':
 
     # system parameters
     parser.add_argument('--lenX', type=int, default=2,help='Number of input variables X')
-    parser.add_argument('--lenY', type=int,default=1,help='Number of output variables Y') 
     parser.add_argument('--states', type=int,default=2,help='Number of states for each random variable')
-    parser.add_argument('--dist_type', default='dirichlet', help='Distribution type')
+    parser.add_argument('--dist_type', default='dirichlet', help='Distribution type (iid, uniform, dirichlet)')
+    parser.add_argument('--prev', default=None,type=lambda x: None if x == 'None' else x, help='Previous data to load in')
+    parser.add_argument('--Sprev', default=False,type=lambda x: bool(strtobool(x)), help='Add SRV to X before constructing cost landscape')
+    parser.add_argument('--second', default=True,type=lambda x: bool(strtobool(x)), help='Compare 2D with other input distribution')
 
     args = parser.parse_args()
     args.folder = '../results/preliminaries/'+args.folder+'/'
-
-    # get input parameters 
-    cur = glob.glob(args.folder+"*.pkl")
     
-    df = pd.read_pickle(cur[args.pickle_idx])
-    paramsXY = list(df['parXY']) # one iid, one dirichlet for example
-    paramsX = [p[:(args.states**args.lenX)-1] for p in paramsXY]
-
-    # compute orthogonal vectors (with PCA or random)
-    if args.PCA:
-        print("JA HALLO")
-        # args.exp ='exp'+args.exp+'.pkl'
-        # # read dataframe of choice
-        # curdf = pd.read_pickle(args.folder+args.exp)
-        # curdf = swithcols(['systemID','runID','I(Y;S)','all_paths','parXYSold'],curdf)
-        # print(curdf)
-        # for i in range(len(curdf)):
-        #     curfile = curdf.iloc[[i]]
-        #     if args.plot:
-        #         print(list(curfile['all_paths'])[-1][-1])
-        #         print(list(curfile['parXYSold'])[-1][-1])
-        #         plot_2D(curfile,args.steps)
+    if args.prev:
+        # TO DO: load df as JPB (params2matrix?)
+        df = pd.read_pickle(args.prev)
     else:
-        # get number of dimensions
+        # Initialize system 1 
+        jpb = JointProbabilityMatrix(args.lenX,args.states,joint_probs=args.dist_type)
+        if args.Sprev:
+            append_synergistic_variables(jpb,1)
+                
+        # Initialize system 2 (I(X1;X2)=...)
+        if args.second:
+            systems = [JointProbabilityMatrix(args.lenX,args.states,joint_probs=args.dist_type)]
+            mis = [0.3,0.9]
+            for m in mis:
+                jpb2 = JointProbabilityMatrix(1,args.states,joint_probs=args.dist_type)
+                append_variables_with_target_mi(jpb2,1,m*jpb2.entropy([0]))
+                systems.append(jpb2)
+            mis = [0] + mis
+
+        # compute each system's properties
+        syn_uppers = []
+        parXs = []
         lenparXS = ((args.states)**(args.lenX+1))-1
         lenparX = ((args.states)**(args.lenX))-1
-        v1, v2 = random_orthogonal_unit_vectors(lenparXS-lenparX)    
-        # get plane of values 
-        params_plane = get_plane_points(v1,v2,steps=args.steps,mag=args.mag)
+        variablesX = np.arange(args.lenX)
+        for s in systems:
+            syn_uppers.append(synergistic_entropy_upper_bound(s,variables=variablesX))
+            parXs.append(matrix2params_incremental(s)[:lenparX])
 
-    # select input parameters parX of cost landscape
-    for i in range(len(df)):
-        par_id = i
-        args.lenX = list(set(df['lenX']))[0]
-        args.states= list(set(df['states']))[0]
-        parX = paramsX[par_id]
-        # get cost_values 
-        cost_plane = get_plane_values(args,df.iloc[[par_id]],params_plane,parX)
-        # print(params_plane)
-        plot_plane(params_plane,cost_plane,plot_func=args.plot_func)
+    if args.PCA:
+        if args.prev:
+            data = df
+        else:
+            data = synergistic_information(jpb,variablesX,variablesX)
+
+        # compute (and plot) PCA 2D plane
+        plot_2D(data,args.steps)
+
+    else:
+        os.chdir("../results/preliminaries/landscape")
+
+        num_plots = 3
+        planes = []
+        for n in range(num_plots):
+            # get number of dimensions and generate two random orthogonal vectors
+            v1, v2 = random_orthogonal_unit_vectors(lenparXS-lenparX)    
+
+            # get plane of values 
+            params_plane = get_plane_points(v1,v2,steps=args.steps,mag=args.mag)
+
+            # get cost_values in plane for each system and plot them
+            for i,s in enumerate(systems):
+                print("Hmax(X)",syn_uppers[i])
+                print("I(X1;X2)",s.mutual_information([0],[1]))
+                cost_plane = get_plane_values(args,params_plane,syn_uppers[i],parXs[i])
+                title = 'dist_type_'+args.dist_type+' I(X1;X2)_'+str(mis[i])+' states_'+str(args.states)+'num_'+str(n)
+                plot_plane(title,params_plane,cost_plane,plot_func=args.plot_func)
