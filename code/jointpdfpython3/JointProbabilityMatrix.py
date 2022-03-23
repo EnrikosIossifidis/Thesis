@@ -11,7 +11,7 @@ from numbers import Number
 from numbers import Integral
 
 # RUN FROM PATH ABOVE jointpdfpython3 FOLDER
-from utils import maximum_depth, flatten, get_var_labels, apply_permutation
+from .utils import maximum_depth, flatten, get_var_labels, apply_permutation
 _type_prob = np.float
 
 from sys import platform

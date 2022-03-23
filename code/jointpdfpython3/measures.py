@@ -8,9 +8,8 @@ import multiprocessing as mp
 
 from scipy.optimize import minimize
 from scipy.sparse import data
-from JointProbabilityMatrix import JointProbabilityMatrix, ConditionalProbabilities
-from params_matrix import matrix2params_incremental,params2matrix_incremental
-from save_min_path_class import Simulator
+from .JointProbabilityMatrix import JointProbabilityMatrix, ConditionalProbabilities
+from .params_matrix import matrix2params_incremental,params2matrix_incremental
 
 def synergistic_entropy_upper_bound(self, variables=None):
     """
@@ -273,24 +272,14 @@ def append_synergistic_variables(self,parX,data,num_synergistic_variables,summed
             else:
                 initial_guess = initial_guesses[ix]
 
-            sim = Simulator(cost_func_subjects_only)
             time_before = time.time()
         
-            optres_ix = minimize(sim.simulate,
+            optres_ix = minimize(cost_func_subjects_only,
                                     initial_guess,
                                     bounds=[(0.0, 1.0)]*num_free_parameters,
-                                    callback=sim.callback,
-                                #  callback=(lambda xv: param_vectors_trace.append(list(xv))) if verbose else None,
+                                    # callback=(lambda xv: param_vectors_trace.append(list(xv))) if verbose else None,
                                     args=(parX,), method=minimize_method,options=minimize_options)
-            # print("P3 PARAM X",parX)
-            # cost = cost_func_subjects_only(initial_guess,parX)
-            # class AttrDict(dict):
-            #     def __init__(self, *args,**kwargs):
-            #         super(AttrDict,self).__init__(*args,**kwargs)
-            #         self.__dict__ = self
-            # optres_ix = {"succes":False,"x":initial_guess}
-            # optres_ix = AttrDict(optres_ix)
-            # data['all_cost'][-1].append(cost)
+                  
             data['all_runtimes'][-1].append(time.time()-time_before)           
             data['all_initials'][-1].append(list(initial_guess))
             data['all_finals'][-1].append(list(optres_ix.x))
@@ -689,9 +678,8 @@ def append_synvar_innerloop(args, minimize_method=None, minimize_options=None,
         assert np.isfinite(cost)
         return float(cost)
 
-    sim = Simulator(cost_func_subjects_only_mpi)
     time_before = time.time()
-    optres_ix = minimize(sim.simulate,initial_guess,
+    optres_ix = minimize(cost_func_subjects_only_mpi,initial_guess,
                         args=(parameter_values_static,),
                         bounds=[(0, 1.0)]*num_free_parameters_synonly, method=minimize_method, options=minimize_options)
 

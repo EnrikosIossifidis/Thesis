@@ -1,8 +1,8 @@
 import numpy as np
 from numba import njit
 from numba import vectorize
-from JointProbabilityMatrix import JointProbabilityMatrix
-from utils import *
+from .JointProbabilityMatrix import JointProbabilityMatrix
+from .utils import *
 
 def matrix2params(d):
     vector_probs = d.joint_probabilities.joint_probabilities
