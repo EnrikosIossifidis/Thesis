@@ -2708,7 +2708,7 @@ class JointProbabilityMatrix(object):
                             print 'debug: agnostic=%s, agn. mi = %s (should be close to 0)' % (agnostic_about, agn_mi)
 
                     total_syn_mi += new_syn_info
-            print("total_syn_mi",total_syn_mi)
+
             if total_syn_mi >= syn_entropy * 0.99:
                 if verbose:
                     print 'debug: found %s\% of the upper bound of synergistic entropy which is high so I stop.'

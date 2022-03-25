@@ -45,9 +45,10 @@ def run_syndisc(d):
                 p_XY.generate_uniform_joint_probabilities(tot_vars,args['states'])
             d['data']['syn_upper'].append(synergistic_entropy_upper_bound(p_XY[variables_X]))
 
-        d['data']['parXY'].append(list(matrix2params_incremental(p_XY)))
 
         # (time) calculation of self-synergy
+        d['data']['parXY'].append(list(matrix2params_incremental(p_XY)))
+        d['data']['I(X1;X2)'].append(p_XY.mutual_information([0],[1]))
         dit_syn = Distribution.from_ndarray(p_XY.joint_probabilities.joint_probabilities)
         if args['lenY'] == 0:
             before = time.time()
@@ -59,7 +60,7 @@ def run_syndisc(d):
             syn, probs = disclosure_channel(dit_syn)
             d['data']['tot_runtime'].append(time.time()-before)
 
-        d['data']['I(Y;S)'].append([syn]) # if lenY=0 then I(Y;S)=I(X;S)
+        d['data']['syn_info'].append(syn) # if lenY=0 then I(Y;S)=I(X;S)
 
         # calculate I(Xi;SRV) for all Xi
         x = p_XY[variables_X].joint_probabilities.joint_probabilities.flatten()
@@ -68,21 +69,19 @@ def run_syndisc(d):
 
         dit_XS = Distribution.from_ndarray(pXS)
         synvars = list(range(len(variables_X),len(dit_XS.rvs)))
+
         try:
             tot_mi = dit.shannon.mutual_information(dit_XS,variables_X,synvars)
             indiv_mutuals = [dit.shannon.mutual_information(dit_XS,[i],synvars) for i in variables_X]
             srv_entropy = dit.shannon.entropy(dit_XS,synvars)
         except AssertionError:
             print('Too large difference prob distributions ')
-            indiv_mutuals = [-1 for _ in variables_X]
+            indiv_mutuals = [0 for _ in variables_X]
             srv_entropy = -1
             tot_mi = -1
 
-        d['data']['I(X;S)'].append(tot_mi) # should be equal to I(X;S) if lenY = 0
-        d['data']['I(Xi;S)'].append(indiv_mutuals)
-        d['data']['H(S)'].append(srv_entropy)
-        d['data']['pXS'].append(list(pXS.flatten()))
-        
+        srv_data = [[srv_entropy,tot_mi,indiv_mutuals,list(pXS.flatten())]]
+        d['data']['srv_data'].append(srv_data)
     d['args'] = args
     return d
 
@@ -110,8 +109,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     
-    d = {'args':[],'data':{'systemID':[], 'parXY':[],'syn_upper':[],'runID':[],
-            'pXS':[],'H(S)':[],'I(X;S)':[],'I(Y;S)':[],'I(Xi;S)':[],'tot_runtime':[]}}
+    d = {'data':{'systemID':[], 'parXY':[],'syn_upper':[],'I(X1;X2)':[],'runID':[],
+            'lenS':[],'tot_runtime':[],'syn_info':[],'srv_data':[]}}
+
     d['args'] = args
     d = run_syndisc(d)
 

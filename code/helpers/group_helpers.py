@@ -1,12 +1,60 @@
-import time
-from datetime import datetime
 import numpy as np
 import itertools
-from numpy.core.fromnumeric import _diagonal_dispatcher
-import seaborn as sns
 import pandas as pd
+import time
+from datetime import datetime
 from itertools import cycle, permutations, combinations
+from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix, ConditionalProbabilityMatrix
 
+lenX = 2
+
+"""
+Calculates all possible modulo random variables for a given number of states
+"""
+def exhaustive_search(args):
+    first_rows = list(itertools.permutations(np.arange(args.states)))
+
+    rows = []
+    empt_mat = np.zeros((args.states,args.states))-1
+    for f in first_rows:
+        temp = empt_mat.copy()
+        temp[0] = f
+        rows.append(temp)
+
+    return find_sudokus(rows)
+
+# TO DO optimize by not transferring whole list of sudokus the whole time
+def find_sudokus(perms,k=0):
+    new_perms = []
+    print(len(perms))
+    for p in perms:
+        new_perms = new_perms + append_rows(p,k+1)
+
+    if k == len(perms[0])-2:
+        return new_perms
+    else:
+        return find_sudokus(new_perms,k+1)
+
+def append_rows(srv,k=1):
+    rows = all_rows(srv, k)
+    new_mods = []
+    for r in rows:
+        temp = srv.copy()
+        temp[k] = r
+        new_mods.append(temp)
+    return new_mods
+
+# TODO optimize getting others list?
+def all_rows(srv, k):
+    s = len(srv)
+    states = np.arange(s)
+    prevs = srv[:k]
+
+    # only select valid rows where all values occur once
+    others = [np.setdiff1d(states,prevs[:,i]) for i in range(s)]
+    arr = np.array(list(itertools.product(*others)))
+    valids = np.array([np.count_nonzero(np.bincount(a))==s for a in arr]) 
+    return arr[np.where(valids)]
 
 """
 Compute cycle types for n states (2 inputs)
@@ -85,12 +133,13 @@ Compute sudoku SRVs, i.e. SRVs for two input variables
         
 def all_sudokus(states):
     cycles = get_all_cycles(states)
-    print("ALL CYCLES",cycles)
     r = np.arange(states)
     srvs = []
     empt_mat = np.zeros((states,states))-1
     empt_mat[0] = r
-    for c in cycles:
+    print(len(cycles))
+    for i,c in enumerate(cycles):
+        print(i)
         temp = empt_mat.copy()
         temp = next_row(cycles,[c],[get_indexes(c,states)],temp,states)
         srvs = srvs + temp
@@ -102,14 +151,11 @@ def next_row(cycles,prev,prev_ids,temp,states,k=1):
     if k+1 == len(temp):
         return [temp]
     
-    old_ids = prev_ids[-1]  # dict value: index in cycle
     new_perms = []
     for c in cycles:
         new_ids = get_indexes(c,states)  # dict value: index in cycle
         
-        # TO DO: replace with compute_cycle in cycle_check notebook?
         if check_cycles(prev,c,prev_ids,new_ids,states):
-#             new = get_cycle(prev,c,old_ids,new_ids,states)
             prev_copy = prev.copy()
             prev_copy.append(c)
             prev_ids_copy = prev_ids.copy()
@@ -131,7 +177,6 @@ def get_indexes(cycle,states):
 
 def get_row(x, cycle):
     if isinstance(cycle[0],int):
-        states = len(x)
         xnew = x.copy()
         for val in cycle:
             xnew[x.index(val)] = cycle[(cycle.index(val)+1)%len(cycle)]
@@ -151,7 +196,6 @@ def get_val(new_val, val_ids):
     val = prev_val[(cur+1)%len(prev_val)]
     return val
 
-"Calculate cycle of combination of two cycles"
 def get_cycle(old,new,old_ids,new_ids,states,cur=0):
     cycles = []
     cycle = [0]
@@ -197,3 +241,95 @@ def check_cycle(old,new,old_ids,new_ids,states):
         if i == new_val:
             return False
     return True
+
+
+"""
+Transform sudokus to SRVs and compute conditional entropy matrix between sudokus
+"""
+def cond_entropies(mods, args,noisy=False):
+    # from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix
+
+    cond_mat = np.zeros((len(mods),len(mods)))
+
+    subjects = np.arange(lenX)
+    pX = JointProbabilityMatrix(lenX,args.states,joint_probs=args.dist_type)
+    for i in range(len(mods)):
+        print(i, datetime.fromtimestamp(time.time()))
+
+        pXSi = append_srv(pX.copy(),mods[i],args, subjects, noisy)
+        entSi = pXSi.entropy(variables=[lenX])
+        for j in range(i+1,len(mods)):
+            pXS = append_srv(pXSi.copy(),mods[j],args, subjects, noisy)
+
+            entSj = pXS.entropy(variables=[lenX+1])     
+            entS = pXS.entropy(variables=[lenX,lenX+1])
+            H_Si_gSj = entS - entSj
+            H_Sj_gSi = entS - entSi
+            # H_Si_gSj = pXS.conditional_entropy([lenX],[lenX+1])
+            # H_Sj_gSi = pXS.conditional_entropy([lenX+1],[lenX])
+
+            cond_mat[i][j] = H_Si_gSj
+            cond_mat[j][i] = H_Sj_gSi
+                        
+    return cond_mat
+
+def append_srv(pX,srv,args,subjects,noisy=False):
+    # mod SRV to cond mat to ConditionalProbabilityMatrix Pr(S|X)
+    if noisy:
+        condmatrix = noisy_to_cond(srv,args)
+    else:
+        matrix = srv_to_mat(srv, args.states,args.lenX)
+        condmatrix = mat_to_cond(matrix,args)
+
+    # cond to Pr(XS)
+    pX.append_variables_using_conditional_distributions(condmatrix, subjects)
+    return pX
+
+def mat_to_cond(matrix, args):
+    # get list of all possible input states
+    input_values = list(itertools.product(*[np.arange(args.states) for _ in range(args.lenX)]))
+
+    cmatrix = ConditionalProbabilityMatrix()
+    for i,row in enumerate(matrix):
+        pdummy = JointProbabilityMatrix(1, args.states)
+        pdummy.joint_probabilities.joint_probabilities = row
+        cmatrix.cond_pdf[input_values[i]] = pdummy
+    return cmatrix
+
+def srv_to_mat(srv, states, lenX, p=0):
+    input_states = states**lenX
+    code_flat = srv.flatten()
+    cond_mat = np.zeros((input_states,states))
+
+    prob_cur = 1 - (p*((states-1)/states))
+    prob_others = (1-prob_cur)/(states-1)
+    for i in range(len(cond_mat)):
+        cond_mat[i, int(code_flat[i])] = prob_cur
+        
+        others = list(range(states))
+        del others[int(code_flat[i])]
+        cond_mat[i,others] = prob_others
+
+    return cond_mat
+
+def noisy_to_cond(srv,args):
+    srv = np.array(srv)
+    shape = srv.shape
+    mat = srv.reshape((shape[1]*shape[2],shape[0]))
+    cmatrix = mat_to_cond(mat,args)
+    return cmatrix
+
+def group_by_cond(mat):
+    labels = np.arange(len(mat))
+    groups = {l:[l] for l in labels}
+    for i,m in enumerate(mat):
+        for j in range(i+1, len(mat)):
+            if labels[i] != labels[j]:
+                if m[j] == 0 and mat[j][i] == 0:
+                    new_group = groups[labels[i]] + groups[labels[j]]
+                    del groups[labels[i]]
+                    del groups[labels[j]]
+                    groups[labels[i]] = new_group
+                    labels[[i,j]] = labels[i]
+    return groups
+    

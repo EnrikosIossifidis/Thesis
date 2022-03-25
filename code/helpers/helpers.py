@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 #################################
 # COMPUTING METRICS HELPERS 
 #################################
-
 def get_prev_id(sys,prev_systems):
     l_sys = len(sys)
     for i,p in enumerate(prev_systems):
@@ -19,15 +18,9 @@ def get_prev_id(sys,prev_systems):
                 return [i]
     return []
 
-def get_syn(row):
-    # print("ROW",row['I(Y;S)'])
-    row['syn_info'] = sum(row['I(Y;S)'])
-    return row
-
 def get_data(args,last=0):
     files = sorted(glob.iglob(args.folder+'/*.json'), key=os.path.getmtime)[-last:]
     d = load_files(files)
-    d = d.apply(get_syn,axis=1)
     return d
 
 def get_best(d, run=True):

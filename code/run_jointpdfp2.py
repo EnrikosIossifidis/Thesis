@@ -28,7 +28,7 @@ def run_jpdf(args,d):
             p_XY.params2matrix_incremental(prev_pars[i])
             d['data']['syn_upper'].append(prev['data']['syn_upper'][i])
         else:
-            if args.dist_type == 'dirichlet':
+            if args.dist_type == 'dirichlet' or args.dist_type == 'random':
                 p_XY.generate_dirichlet_joint_probabilities()
             else:
                 p_XY.generate_uniform_joint_probabilities(tot_vars,args.states)
@@ -43,27 +43,23 @@ def run_jpdf(args,d):
                                 ,minimize_method=args.mm,num_repeats_per_srv_append=args.n_repeats,
                                 initial_guess_summed_modulo=args.summed_modulo,verbose=False)
         d['data']['tot_runtime'].append(time.time()-before)
-        d['data']['I(Y;S)'].append([syn])
+        d['data']['syn_info'].append(syn)
 
         # # calculate I(Xi;SRV) for all Xi
         synvars = list(np.arange(tot_vars,len(p_XYS)))
-
         d['data']['lenS'].append(len(synvars))
-        srv_entropy = 0
-        indiv_mutuals = []
 
+        srv_data = []  
         if len(synvars)>0:
             for svar in range(len(synvars)):
-                srv_entropy = p_XYS.entropy(variables=[tot_vars+svar])   
-                indiv_mutuals = [p_XYS.mutual_information([i],[tot_vars+svar]) for i in variables_X]
-                tot_mutual = p_XYS.mutual_information(variables_X,[tot_vars+svar])
-                d['data']['H(S)'].append(srv_entropy)
-                d['data']['I(Xi;S)'].append(indiv_mutuals)
-                d['data']['I(X;S)'].append(tot_mutual)
+                srv = []            
+                srv.append(p_XYS.entropy(variables=[tot_vars+svar]))
+                srv.append(p_XYS.mutual_information(variables_X,[tot_vars+svar]))
+                srv.append([p_XYS.mutual_information([i],[tot_vars+svar]) for i in variables_X])
+                srv.append(list(p_XYS[list(variables_X)+[tot_vars+svar]].joint_probabilities.joint_probabilities.flatten()))
+                srv_data.append(srv)
+        d['data']['srv_data'].append(srv_data)
 
-            pXS = p_XYS[list(variables_X)+synvars].joint_probabilities.joint_probabilities.flatten()
-            d['data']['pXS'].append(list(pXS))
-            
     d['args'] = vars(args)
     return d
 
@@ -97,7 +93,7 @@ if __name__ == '__main__':
     
     # print("DEBUG",__debug__)
     d = {'data':{'systemID':[], 'parXY':[],'syn_upper':[],'I(X1;X2)':[],'runID':[],
-            'pXS':[],'lenS':[],'H(S)':[],'I(Y;S)':[],'I(X;S)':[],'I(Xi;S)':[],'tot_runtime':[]}}
+            'lenS':[],'tot_runtime':[],'syn_info':[],'srv_data':[]}}
 
     d = run_jpdf(args,d)
 
