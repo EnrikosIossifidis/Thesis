@@ -40,10 +40,11 @@ def random_orthogonal_unit_vectors(dim):
     v2 = v2/np.linalg.norm(v2)
     return v1, v2
 
-def get_plane_points(v1,v2,mag=1,steps=10):
+def get_plane_points(v1,v2,mag=1,steps=10,mid=[]):
     mag = 1
     dim = len(v1)
-    mid = [0.5 for _ in range(dim)]
+    if len(mid) == 0:
+        mid = [0.5 for _ in range(dim)]
     v3 = (v1*mag)
     v4 = (v2*mag)
 
@@ -56,6 +57,23 @@ def get_plane_points(v1,v2,mag=1,steps=10):
         for p2 in plane2:
             plane.append(p1+(p2-mid))
     return np.array(plane)
+
+def plane_selected_params(ix,iy,mid,steps=10):
+    bef = list(range(min(ix,iy)))
+    m = list(range(min(ix,iy)+1,max(ix,iy)))
+    aft = list(range(max(ix,iy)+1,len(mid)))
+
+    # get plane given random orthogonal unit vectors
+    plane1 = np.linspace(0,1,steps,endpoint=True)
+    plane2 = np.linspace(0,1,steps,endpoint=True)
+    # plane1 = list(np.arange(0,1,mid[ix]/(steps/2)))+[1]
+    # plane2 = list(np.arange(0,1,mid[iy]/(steps/2)))+[1]
+    arr = np.meshgrid(*[plane1,plane2])
+    data = np.array(arr).reshape(len(arr), -1).T
+    conc = []
+    for d in data:
+        conc.append(np.concatenate([mid[bef],[d[0]],mid[m],[d[1]],mid[aft]]))
+    return conc
 
 def get_plane_values(args,plane,syn_upper,parX):
     steps=args.steps
@@ -278,91 +296,3 @@ def plot_landscape_path(args,trans_X,grid_nD,grid_2D,axes_2D,range_steps):
     # plt.scatter(grid_2D[i][j][0],grid_2D[i][j][1],color='orange')
     
     plt.show()
-
-
-def cost_func_subjects_only(args,free_params,extra_cost_rel_error=True):
-    if min(free_params) < -0.00001 or max(free_params) > 1.00001:
-        # warnings.warn('scipy\'s minimize() is violating the parameter bounds 0...1 I give it: '
-        #             + str(args['free_params']))
-
-        # high cost for invalid parameter values
-        # note: maximum cost normally from this function is about 2.0
-        # return -1
-        return 10.0 + 100.0 * np.sum([p - 1.0 for p in free_params if p > 1.0]
-                                    + [np.abs(p) for p in free_params if p < 0.0])
-
-    # assert max(free_params) <= 1.00001, \
-    #     'scipy\'s minimize() is violating the parameter bounds 0...1 I give it: ' + str(free_params)
-
-    free_params = [min(max(fp, 0.0), 1.0) for fp in free_params]  # clip small roundoff errors
-    pdf_subjects_snew = args['pdf_subjects_snew'].copy()
-    params2matrix_incremental(pdf_subjects_snew,list(args['given_params']) + list(free_params))
-
-    # make a conditional distribution of the synergistic variables conditioned on the subject variables
-    # so that I can easily make a new joint pdf object with them and quantify this extra cost for the
-    # agnostic constraint
-    len_subs = len(args['subjects'])
-    len_pXSnew = len(pdf_subjects_snew)
-    cond_pdf_syns_on_subjects = pdf_subjects_snew.conditional_probability_distributions(
-        range(len_subs)) # pSnew|subjects
-
-    # assert type(cond_pdf_syns_on_subjects) == dict \
-    #     or isinstance(cond_pdf_syns_on_subjects, ConditionalProbabilities)
-    pdf_XYSold = args['pdf_XYSold'].copy()
-    pdf_XYSold.append_variables_using_conditional_distributions(cond_pdf_syns_on_subjects,
-                                                                                args['subjects']) #pXYSoldSnew
-
-    tot_mi = pdf_XYSold.mutual_information(range(len_subs, len_pXSnew),
-                    range(len_subs)) # I(X;S))
-
-    indiv_mis = [pdf_XYSold.mutual_information([var],range(len_subs,len_pXSnew))
-                    for var in range(len_subs)] # I(Xi;S)
-
-    syninfo_naive = tot_mi - sum(indiv_mis)
-
-    # # this if-block will add cost for the estimated amount of synergy induced by the proposed parameters,
-    # # and possible also a cost term for the ratio of synergistic versus non-synergistic info as extra
-    if not args['subjects'] is None:
-        assert pdf_subjects_snew.numvariables == len_subs + args['num_search_srvs']
-
-        # this can be considered to be in range [0,1] although particularly bad solutions can go >1
-        if not extra_cost_rel_error:
-            cost = (args['syn_upperbound'] - pdf_subjects_snew.synergistic_information_naive(
-                variables_SRV=range(len_subs, len_pXSnew),
-                variables_X=args['subjects'])) / args['syn_upperbound']
-        else:
-            # this can be considered to be in range [0,1] although particularly bad solutions can go >1
-            cost = (args['syn_upperbound'] - syninfo_naive)/args['syn_upperbound']
-            # add an extra cost term for the fraction of 'individual' information versus the total information
-            # this can be considered to be in range [0,1] although particularly bad solutions can go >1
-            if tot_mi != 0:
-                cost += sum(indiv_mis) / tot_mi
-            else:
-                cost += sum(indiv_mis)
-
-    # this if-block will add a cost term for not being agnostic to given variables, usually (a) previous SRV(s)
-    if not args['agnostic_about'] is None:
-        assert not args['subjects'] is None, 'how can all variables be subject_variables and you still want' \
-                                            ' to be agnostic about certain (other) variables? (if you did' \
-                                            ' not specify subject_variables, do so.)'
-
-        # make a conditional distribution of the synergistic variables conditioned on the subject variables
-        # so that I can easily make a new joint pdf object with them and quantify this extra cost for the
-        # agnostic constraint
-        cond_pdf_syns_on_subjects = pdf_subjects_syns_only.conditional_probability_distributions(
-            range(len(subject_variables))
-        )
-
-        assert type(cond_pdf_syns_on_subjects) == dict \
-                or isinstance(cond_pdf_syns_on_subjects, ConditionalProbabilities)
-
-        pdf_with_srvs_for_agnostic = self.copy()
-        pdf_with_srvs_for_agnostic.append_variables_using_conditional_distributions(cond_pdf_syns_on_subjects,
-                                                                                    subject_variables)
-
-
-
-    assert np.isscalar(cost)
-    assert np.isfinite(cost)
-    return float(cost)
-

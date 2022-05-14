@@ -102,7 +102,6 @@ def disclosure_channel(dist, cons=None, output=None):
             count = count + 1
 
     P = build_constraint_matrix(cons, dist.coalesce(inputs))
-
     return syn_solve(P, pX.pmf, pWgX_ndarray)
 
 

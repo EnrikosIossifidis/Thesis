@@ -7,9 +7,9 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-#################################
-# COMPUTING METRICS HELPERS 
-#################################
+import matplotlib
+import matplotlib.cm as cmx
+
 def get_prev_id(sys,prev_systems):
     l_sys = len(sys)
     for i,p in enumerate(prev_systems):
@@ -18,9 +18,9 @@ def get_prev_id(sys,prev_systems):
                 return [i]
     return []
 
-def get_data(args,last=0):
+def get_data(args,last=0,sort=False):
     files = sorted(glob.iglob(args.folder+'/*.json'), key=os.path.getmtime)[-last:]
-    d = load_files(files)
+    d = load_files(files,sort=sort)
     return d
 
 def get_best(d, run=True):
@@ -72,7 +72,7 @@ def dict_to_pd(d, filename):
 
     return df
 
-def load_files(filenames):
+def load_files(filenames,sort=True):
     
     dfs = []
     prevs = {}
@@ -84,28 +84,29 @@ def load_files(filenames):
             d['data']['runID'] = list(np.zeros(len(d['data']['systemID'])))
         
         # correct systemID and runID to concat all data
-        for i, sys in enumerate(d['data']['parXY']):
-            if len(prev_systems)>0:
-                prev_id = get_prev_id(sys,prev_systems)
-                
-                if len(prev_id)==0:
-                    prev_systems.append(sys)
-                    cur = len(prev_systems)-1
-                    prevs[cur] = [0]
-                    d['data']['systemID'][i] = cur
-                    d['data']['runID'][i] = 0
+        if sort:
+            for i, sys in enumerate(d['data']['parXY']):
+                if len(prev_systems)>0:
+                    prev_id = get_prev_id(sys,prev_systems)
+                    
+                    if len(prev_id)==0:
+                        prev_systems.append(sys)
+                        cur = len(prev_systems)-1
+                        prevs[cur] = [0]
+                        d['data']['systemID'][i] = cur
+                        d['data']['runID'][i] = 0
+                    else:
+                        assert len(prev_id) == 1
+                        cur = prevs[prev_id[0]]
+                        cur.append(cur[-1]+1)
+                        d['data']['systemID'][i] = prev_id[0]
+                        d['data']['runID'][i] = cur[-1]
                 else:
-                    assert len(prev_id) == 1
-                    cur = prevs[prev_id[0]]
-                    cur.append(cur[-1]+1)
-                    d['data']['systemID'][i] = prev_id[0]
-                    d['data']['runID'][i] = cur[-1]
-            else:
-                prev_systems.append(sys)
-                cur = 0
-                prevs[cur] = [0]
-                d['data']['systemID'][i] = 0
-                d['data']['runID'][i] = 0
+                    prev_systems.append(sys)
+                    cur = 0
+                    prevs[cur] = [0]
+                    d['data']['systemID'][i] = 0
+                    d['data']['runID'][i] = 0
             
         df = dict_to_pd(d, filename)    
         dfs.append(df)
@@ -146,6 +147,53 @@ def sort_systems_runs(unsorted_df):
 ####################
 # PLOT HELPERS
 ####################
+def load_frame_sym(states=2,d=None):        
+    # prep dataframe for calculations
+    d = d.replace(np.nan, 0)
+    d['lenS'] = d['lenS'].astype(int)
+
+    col_names = []
+    if 'I(X;sym)' in d.columns:
+        df1 = d[['I(X;sym)','I(Xi;sym)']]
+        for col in list(df1):
+            for col_number in range(max(df1[col].apply(len))):
+                col_names.append(col + "_" + str(col_number + 1))
+        df2 = pd.concat([pd.DataFrame(df1['I(X;sym)'].tolist(), index= df1.index),
+                        pd.DataFrame(df1['I(Xi;sym)'].tolist(), index= df1.index)], axis = 1)
+        df2.columns = col_names
+        for col in [col for col in col_names if 'Xi' in col]:
+            df2[col] = [sum(a) for a in df2[col].tolist()]
+        for c in col_names:
+            d[c] = df2[c]
+    return d, col_names
+
+# https://stackoverflow.com/a/27179208
+def scatter3d(d,x,y,z, cskey, colorsMap='jet',hue='syn_info',angle=145,states=[2,3]):
+    cs = d[cskey]
+    cm = plt.get_cmap(colorsMap)
+    cNorm = matplotlib.colors.Normalize(vmin=min(cs), vmax=max(cs))
+    scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cm)
+    fig, axes = plt.subplots(1,len(states),figsize=(20,20),subplot_kw=dict(projection='3d'))
+    for i,state in enumerate(states):
+        cur = d[d['states']==state]
+        plotx = cur[x]
+        ploty = cur[y]
+        plotz = cur[z]
+        print(i,state)
+        axes[i].view_init(azim=angle)
+        axes[i].scatter(plotx, ploty, plotz, c=scalarMap.to_rgba(cur[cskey]))
+        axes[i].set_xlabel(plotx.name, fontsize=14)
+        axes[i].set_ylabel(ploty.name, fontsize=14)
+        axes[i].set_zlabel(plotz.name, fontsize=14)
+    scalarMap.set_array(cs)
+    cax = fig.add_axes([axes[-1].get_position().x1+0.033,axes[-1].get_position().y0,0.02,axes[-1].get_position().height])
+    cbar = fig.colorbar(scalarMap,cax=cax)
+    cbar.set_label(hue)
+    cbar.set_ticks([min(cs),max(cs)])
+    axes[1].set_title('states = '+str(states),fontsize=15)
+    # plt.title('states='+str(states))
+    plt.savefig('../../results/test/3dwmsstates'+str(states)+'.png', bbox_inches='tight')    
+    plt.show()
 
 # https://stackoverflow.com/questions/35042255/how-to-plot-multiple-seaborn-jointplot-in-subplot
 import matplotlib.gridspec as gridspec

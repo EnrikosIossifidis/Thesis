@@ -15,41 +15,44 @@ from jointpdfpython3.measures import synergistic_entropy_upper_bound
 def run_syndisc(d):
     args = vars(d['args'])
     prev = None
+    load_pars = False
     if d['args'].prev:
         with open(d['args'].folder+d['args'].prev) as file:
             prev = json.load(file)
             prev_pars = prev['data']['parXY']
             args = prev['args']
+        args['systems'] = len(prev_pars)
+        load_pars = True 
 
     tot_vars = args['lenX'] + args['lenY']
     variables_X = np.arange(args['lenX'])
     variables_Y = np.arange(args['lenX'],tot_vars)
     p_XY = JointProbabilityMatrix(tot_vars,args['states'])
-
     for i in range(args['systems']):
-        print("CUR NUM",i)
         d['data']['systemID'].append(i)
         # generate or load Pr(XY)
-        if prev:
+        if load_pars:
             params2matrix_incremental(p_XY,prev_pars[i])
-            d['data']['syn_upper'].append(prev['data']['syn_upper'][i])
-
-            # check if same dist by checking same upperbound
             cur = synergistic_entropy_upper_bound(p_XY[variables_X])
-            if not np.allclose(cur,d['data']['syn_upper'][-1]):
-                print("ALERT syn_upper not the same (i.e. pX not the same)")
+            # check if same dist by checking same upperbound
+            if prev:
+                if not np.allclose(cur,d['data']['syn_upper'][-1]):
+                    print("ALERT syn_upper not the same (i.e. pX not the same)")
         else:
             if args['dist_type'] == 'dirichlet' or args['dist_type'] == 'random':
                 p_XY.generate_dirichlet_joint_probabilities()
             else:
                 p_XY.generate_uniform_joint_probabilities(tot_vars,args['states'])
-            d['data']['syn_upper'].append(synergistic_entropy_upper_bound(p_XY[variables_X]))
-
+            cur = synergistic_entropy_upper_bound(p_XY[variables_X])
+        d['data']['syn_upper'].append(cur)
 
         # (time) calculation of self-synergy
         d['data']['parXY'].append(list(matrix2params_incremental(p_XY)))
         d['data']['I(X1;X2)'].append(p_XY.mutual_information([0],[1]))
+        d['data']['H(Xi)'].append([p_XY.entropy([i]) for i in variables_X])
+
         dit_syn = Distribution.from_ndarray(p_XY.joint_probabilities.joint_probabilities)
+
         if args['lenY'] == 0:
             before = time.time()
             syn, probs = self_disclosure_channel(dit_syn)
@@ -69,10 +72,9 @@ def run_syndisc(d):
 
         dit_XS = Distribution.from_ndarray(pXS)
         synvars = list(range(len(variables_X),len(dit_XS.rvs)))
-
         try:
             tot_mi = dit.shannon.mutual_information(dit_XS,variables_X,synvars)
-            indiv_mutuals = [dit.shannon.mutual_information(dit_XS,[i],synvars) for i in variables_X]
+            indiv_mutuals = sum([dit.shannon.mutual_information(dit_XS,[i],synvars) for i in variables_X])
             srv_entropy = dit.shannon.entropy(dit_XS,synvars)
         except AssertionError:
             print('Too large difference prob distributions ')
@@ -80,7 +82,9 @@ def run_syndisc(d):
             srv_entropy = -1
             tot_mi = -1
 
-        srv_data = [[srv_entropy,tot_mi,indiv_mutuals,list(pXS.flatten())]]
+        srv_data = [srv_entropy,tot_mi,indiv_mutuals,list(pXS.flatten())]
+        d['data']['pX'].append(list(x))
+        d['data']['shapeS'].append(pXS.shape)
         d['data']['srv_data'].append(srv_data)
     d['args'] = args
     return d
@@ -108,11 +112,10 @@ if __name__ == '__main__':
     parser.add_argument('--rowfolder', default="/row_data/", help='Folder in which each single run is saved')
 
     args = parser.parse_args()
-    
-    d = {'data':{'systemID':[], 'parXY':[],'syn_upper':[],'I(X1;X2)':[],'runID':[],
-            'lenS':[],'tot_runtime':[],'syn_info':[],'srv_data':[]}}
+    d = {'data':{'systemID':[],'pX':[],'parXY':[],'syn_upper':[],'H(Xi)':[],'I(X1;X2)':[],'runID':[],
+            'shapeS':[],'tot_runtime':[],'syn_info':[],'srv_data':[]}}
 
-    d['args'] = args
+    d['args'] = args    
     d = run_syndisc(d)
 
     if args.save:

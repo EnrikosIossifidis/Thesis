@@ -1505,3 +1505,42 @@ class JointProbabilityMatrix(object):
             assert np.ndim(scalars) == 1
 
             return scalars
+
+    def costrelent(self,relent,maxent):
+        mi = self.mutual_information([0],[1])
+        ent1 = self.entropy([0])
+        ent2 = self.entropy([1])
+        maxmi = max(ent1,ent2)
+        return abs(relent-(ent1/maxent))+abs(relent-(ent2/maxent))+abs(relent-(mi/maxmi))
+
+    def synergistic_information_naive(self, variables_SRV=[2], variables_X=[0,1], return_also_relerr=False):
+        """
+        Estimate the amount of synergistic information contained in the variables (indices) <variables_SRV> about the
+        variables (indices) <variables_X>. It is a naive estimate which works best if <variables_SRV> is (approximately)
+        an SRV, i.e., if it already has very small MI with each individual variable in <variables_X>.
+
+        Also referred to as the Whole-Minus-Sum (WMS) algorithm.
+
+        Note: this is not compatible with the definition of synergy used by synergistic_information(), i.e., one is
+        not an unbiased estimator of the other or anything. Very different.
+
+        :param variables_SRV:
+        :param variables_X:
+        :param return_also_relerr: if True then a tuple of 2 floats is returned, where the first is the best estimate
+         of synergy and the second is the relative error of this estimate (which is preferably below 0.1).
+        :rtype: float or tuple of float
+        """
+
+        indiv_mis = [self.mutual_information(list(variables_SRV), list([var_xi])) for var_xi in variables_X]
+        total_mi = self.mutual_information(list(variables_SRV), list(variables_X))
+
+        syninfo_lowerbound = total_mi - sum(indiv_mis)
+        syninfo_upperbound = total_mi - max(indiv_mis)
+
+        if not return_also_relerr:
+            return (syninfo_lowerbound + syninfo_upperbound) / 2.0
+        else:
+            best_estimate_syninfo = (syninfo_lowerbound + syninfo_upperbound) / 2.0
+            uncertainty_range = syninfo_upperbound - syninfo_lowerbound
+
+            return (best_estimate_syninfo, uncertainty_range / best_estimate_syninfo)

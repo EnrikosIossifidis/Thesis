@@ -22,7 +22,7 @@ def run_jpdf(args,d):
 
     p_XY = JointProbabilityMatrix(tot_vars,args.states)
     for i in range(args.systems):
-        print("CUR NUM",i)
+        print("CUR NUM",i,time.strftime("%H:%M:%S", time.localtime()))
         # generate or load Pr(XY)c
         if prev:
             p_XY.params2matrix_incremental(prev_pars[i])
@@ -35,9 +35,11 @@ def run_jpdf(args,d):
             d['data']['syn_upper'].append(p_XY[variables_X].synergistic_entropy_upper_bound())
 
         d['data']['systemID'].append(i)
+        d['data']['pX'].append(list(p_XY[variables_X].joint_probabilities.joint_probabilities.flatten()))
         d['data']['parXY'].append(list(p_XY.matrix2params_incremental()))
         d['data']['I(X1;X2)'].append(p_XY.mutual_information([0],[1]))
-            
+        d['data']['H(Xi)'].append([p_XY.entropy([i]) for i in variables_X])
+
         before = time.time()
         syn,p_XYS = p_XY.synergistic_information(variables_Y,variables_X,tol_nonsyn_mi_frac=args.tol
                                 ,minimize_method=args.mm,num_repeats_per_srv_append=args.n_repeats,
@@ -47,19 +49,19 @@ def run_jpdf(args,d):
 
         # # calculate I(Xi;SRV) for all Xi
         synvars = list(np.arange(tot_vars,len(p_XYS)))
-        d['data']['lenS'].append(len(synvars))
 
-        srv_data = []  
+        entS = 0
+        totmi = 0
+        indivmi = 0
+        pfinal = []
         if len(synvars)>0:
             for svar in range(len(synvars)):
-                srv = []            
-                srv.append(p_XYS.entropy(variables=[tot_vars+svar]))
-                srv.append(p_XYS.mutual_information(variables_X,[tot_vars+svar]))
-                srv.append([p_XYS.mutual_information([i],[tot_vars+svar]) for i in variables_X])
-                srv.append(list(p_XYS[list(variables_X)+[tot_vars+svar]].joint_probabilities.joint_probabilities.flatten()))
-                srv_data.append(srv)
-        d['data']['srv_data'].append(srv_data)
-
+                entS += p_XYS.entropy(variables=[tot_vars+svar])
+                totmi += p_XYS.mutual_information(variables_X,[tot_vars+svar])
+                indivmi += sum([p_XYS.mutual_information([i],[tot_vars+svar]) for i in variables_X])
+            pfinal = list(p_XYS.joint_probabilities.joint_probabilities.flatten())
+        d['data']['srv_data'].append([entS,totmi,indivmi,pfinal])
+        d['data']['shapeS'].append(p_XYS.joint_probabilities.joint_probabilities.shape)
     d['args'] = vars(args)
     return d
 
@@ -92,8 +94,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # print("DEBUG",__debug__)
-    d = {'data':{'systemID':[], 'parXY':[],'syn_upper':[],'I(X1;X2)':[],'runID':[],
-            'lenS':[],'tot_runtime':[],'syn_info':[],'srv_data':[]}}
+    d = {'data':{'systemID':[],'pX':[],'parXY':[],'syn_upper':[],'H(Xi)':[],'I(X1;X2)':[],'runID':[],
+            'shapeS':[],'tot_runtime':[],'syn_info':[],'srv_data':[]}}
 
     d = run_jpdf(args,d)
 

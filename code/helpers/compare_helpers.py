@@ -10,39 +10,31 @@ import dit
 from dit import Distribution
 from datetime import datetime
 from itertools import cycle, permutations, combinations
+# sys.path.append('../')
 from helpers.group_helpers import append_srv
-sys.path.append('../')
 from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix
 
 def reshp(row):
-    if row['exp_sort'] == 'syndisc':
-        shape = tuple([row['states'] for _ in range(row['lenX'])]+[row['statesS']])
+    # statesS =int(len(row['pXS'])/(row['states']**row['lenX']))
+    # shape = tuple([int(row['states']) for _ in range(row['lenX'])]+[int(statesS)])
+    if len(row['shapeS'])>row['lenX']:
+        return np.array(row['pXS']).reshape(row['shapeS'])
     else:
-        shape = tuple([row['states'] for _ in range(row['lenX'])]+[row['states']])
-    return np.array(row['pXS']).reshape(shape)
-
-def getstatesS(expsort,lenpXS,states,lenX):
-    if expsort == 'syndisc':
-        return int(lenpXS/(states**lenX))
-    else:
-        return states
-
-def load_frame(states,dist_type,folder):
-    os.chdir(folder)
-    allfiles = list(glob.iglob("*.pkl"))
-    name = dist_type+'states'+str(states) 
-    files_dataframes = [pd.read_pickle(file) for file in allfiles if name in file]
-    os.chdir("../../code")
-
+        return []
+def load_frame(states=2,dist_type='uniform',folder='../results/rundata',d=None):
+    if d is None:
+        os.chdir(folder)
+        allfiles = list(glob.iglob("*.pkl"))
+        name = dist_type+'states'+str(states) 
+        print(name,os.getcwd())
+        files_dataframes = [pd.read_pickle(file) for file in allfiles if name in file]
+        os.chdir("../../code/")
+        print(os.getcwd())
+        d = pd.concat(files_dataframes)
     # prep dataframe for calculations
-    d = pd.concat(files_dataframes)
-    d = d.replace(np.nan, 0)
-    d.loc[d['exp_sort']=='syndisc','lenS'] = 1 
-    d = d[d['lenS']>0] # only keep runs where srvs where found, i.e. syn info > 0
-    d = d.explode('srv_data')
-    d['lenS'] = d['lenS'].astype(int)
     d['lenX'] = d['lenX'].astype(int)
-
+    d['H(X0)'] = d[['H(Xi)']].apply(lambda row:row['H(Xi)'][0],axis=1)
+    d['H(X1)'] = d[['H(Xi)']].apply(lambda row:row['H(Xi)'][1],axis=1)
     col_names = []
     df1 = d[['srv_data']]
     for col in list(df1):
@@ -54,34 +46,10 @@ def load_frame(states,dist_type,folder):
     d['I(X;S)'] = df2['srv_data_2']
     d['I(Xi;S)'] = df2['srv_data_3']
     d['pXS'] = df2['srv_data_4']
-    d['WMS(X)/Hmax(X)'] = d.apply(lambda row: (row['I(X;S)']-sum(np.array(row['I(Xi;S)'])))/row['syn_upper'],axis=1)
-    d['statesS'] = d.apply(lambda row:getstatesS(row['exp_sort'],len(row['pXS']),row['states'],row['lenX']),axis=1) # compute |SRV|
+    d['WMS(X;S)'] = d.apply(lambda row: (row['I(X;S)']-row['I(Xi;S)'])/row['syn_upper'],axis=1)
     d['pXS'] = d.apply(lambda row : reshp(row), axis = 1) # reshape pXS to compute entropy measures
+    d['pX'] = d[['pX','lenX','states']].apply(lambda row : np.array(row['pX']).reshape(tuple(row['states'] for _ in range(row['lenX']))), axis = 1) # reshape pXS to compute entropy measures
     return d
-
-def load_sudokus(states=[]):
-    os.chdir("../results/sudokus")
-    allfiles = list(glob.iglob("*.pkl"))
-    allfiles = [file for file in allfiles if 'permutation' in file or 'noisy' in file]
-    d = {}
-    
-    for state in states:
-        sudos = [file for file in allfiles if'states'+str(state) in file]
-        d[state] = {'permutation':[],'noisy':[]}
-        d[state] = load_sudoku(sudos,d[state])
-    
-    os.chdir("../../code")
-    return d
-
-def load_sudoku(sudos,data):
-    for s in sudos:
-        if 'noisy' in s:
-            with open(s, 'rb') as f:
-                data['noisy'] = data['noisy'] + list(pickle.load(f))
-        else:
-            with open(s, 'rb') as f:
-                data['permutation'] = data['permutation'] + list(pickle.load(f))
-    return data
 
 # https://stackoverflow.com/a/28345836
 class Namespace:
@@ -124,3 +92,107 @@ def mincondentropy(row,sudokus,nosyndisc=False):
         row['I(X;min_perm)'] = besttot
         row['sum(I(Xi;min_perm))'] = sum(np.array(bestmis))
         return row
+
+def normcondentropy(row,syms):
+    print(row['systemID'],datetime.fromtimestamp(time.time()))
+    lenX = row['lenX']
+    subjects = np.arange(lenX)
+    pX = row['pX']
+    pXS = row['pXS']
+    conds = []
+    for i,s in enumerate(syms):
+        pXSSym = appendtoPXS(lenX,pX,pXS,s)
+        d = dit.Distribution.from_ndarray(pXSSym)
+        # row['I(X;sym'+str(i)+')'] = dit.shannon.mutual_information(d,subjects,[lenX+1])
+        # row['I(Xi;sym'+str(i)+')'] = sum([dit.shannon.mutual_information(d,[j],[lenX+1]) for j in subjects])
+        # row['WMS(X;sym'+str(i)+')'] = (row['I(X;sym'+str(i)+')']-row['I(Xi;sym'+str(i)+')'])
+        conds.append(dit.shannon.conditional_entropy(d,[lenX],[lenX+1])/row['H(S)'])
+    row['H(Sfound|Sym)'] = conds
+    return row
+
+def bestoffive(row,args,syms):
+    print(row['systemID'],datetime.fromtimestamp(time.time()))
+    conds = row['H(Sfound|Sym)']
+    # print(conds)
+    cond_top5 = sorted(zip(np.arange(len(conds)),conds), key=lambda t: t[1])[:args.top]
+    bestids = np.array(cond_top5,dtype=int)[:,0]
+    sym_top5 = syms[bestids]
+    jointp = row['pXS'].copy()
+    for s in sym_top5:
+        jointp = appendtoPXS(args.lenX,row['pX'],jointp,s)
+    
+    ditd = dit.Distribution.from_ndarray(jointp)
+    synvars = list(range(args.lenX+1,len(ditd.rvs)))
+    row['H(Sfound|bestof)'] = dit.shannon.conditional_entropy(ditd,[args.lenX],synvars)/row['H(S)']
+    row['H(Sfound|Smin)'] = cond_top5[0][1]
+    row['WMS(X;Smin)'] = row['WMS(X;sym'+str(bestids[0])+')']
+    row['I(Xi;Smin)'] = row['I(Xi;sym'+str(bestids[0])+')']
+    return row
+
+def appendtoPXS(lenX,pX,pXS,sym,verbose=False):
+    symstates = len(sym[0])
+    lenpXS = len(pXS.shape)
+    ls = [np.arange(i) for i in pX.shape]
+    inpstates=list(itertools.product(*ls))
+    inpdict = {inp:i for i,inp in enumerate(inpstates)}
+    ls = ls+[np.arange(t) for t in pXS.shape[lenX:]]+[np.arange(symstates)]
+    newstates=list(itertools.product(*ls))
+    newshape = tuple(list(pXS.shape)+[symstates])
+    pXSSym = np.zeros(newshape)
+    for i in newstates:
+        curinpstate = inpdict[i[:lenX]]
+        # value of symSRV given X
+        curprob = sym[curinpstate][i[-1]] 
+        # p(XSfoundSym) = p(XSfound)*p(Sym|X), since Sym does not depend on Sfound/other Syms
+        pXSSym[i] += pXS[i[:lenpXS]]*curprob
+    return pXSSym
+
+def addbestsym(lenX,jXS,upper,syms):
+    subjects = np.arange(lenX)
+    lenjXS = len(jXS)
+    pX = jXS[subjects].joint_probabilities.joint_probabilities
+    pXS = jXS.joint_probabilities.joint_probabilities
+    
+    mincost = 1000
+    bestpXSSym = []
+    bestid = None
+    for i,s in enumerate(syms):
+        pXSSym = appendtoPXS(lenX,pX,pXS,s)
+        d = dit.Distribution.from_ndarray(pXSSym)
+        totmi = dit.shannon.mutual_information(d,subjects,[lenjXS])
+        indivmi = sum([dit.shannon.mutual_information(d,[j],[lenjXS]) for j in subjects])
+        wms = totmi-indivmi
+        cost = (upper - wms)/upper
+        if totmi!=0:
+            cost+=1000*(indivmi/totmi)
+        else:
+            cost+=indivmi
+        if cost < mincost:
+            mincost = cost
+            bestpXSSym = pXSSym
+            bestid = i
+    return bestpXSSym, bestid
+
+def getbestsym(lenX,upper,pX,pXS,syms):
+    subjects = np.arange(lenX)
+    lenjXS = len(pXS.shape)
+    
+    mincost = 1000
+    bestpXSSym = []
+    bestid = None
+    for i,s in enumerate(syms):
+        pXSSym = appendtoPXS(lenX,pX,pXS,s)
+        d = dit.Distribution.from_ndarray(pXSSym)
+        totmi = dit.shannon.mutual_information(d,subjects,[lenjXS])
+        indivmi = sum([dit.shannon.mutual_information(d,[j],[lenjXS]) for j in subjects])
+        wms = totmi-indivmi
+        cost = (upper - wms)/upper
+        if totmi!=0:
+            cost+=(indivmi/totmi)
+        else:
+            cost+=indivmi
+        if cost < mincost:
+            mincost = cost
+            bestpXSSym = pXSSym
+            bestid = i
+    return bestpXSSym, bestid

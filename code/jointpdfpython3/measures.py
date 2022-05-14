@@ -5,11 +5,14 @@ import warnings
 import time
 import itertools
 import multiprocessing as mp
+import os
 
 from scipy.optimize import minimize
 from scipy.sparse import data
 from .JointProbabilityMatrix import JointProbabilityMatrix, ConditionalProbabilities
 from .params_matrix import matrix2params_incremental,params2matrix_incremental
+
+from helpers.compare_helpers import addbestsym # works if code is run from ../code
 
 def synergistic_entropy_upper_bound(self, variables=None):
     """
@@ -90,11 +93,11 @@ def append_random_srv(self,parameter_values_before,num_syn):
     params2matrix_incremental(self_with_random_srv,parameter_values_before + list(random_pars))
     return self_with_random_srv
 
-def append_synergistic_variables(self,parX,data,num_synergistic_variables,summed_modulo=False,\
+def append_synergistic_variables(self,parX,num_synergistic_variables,\
                                         subject_variables=None,num_repeats=1,\
                                         agnostic_about=None,minimize_method=None,\
                                         tol_nonsyn_mi_frac=0.05, tol_agn_mi_frac=0.05,\
-                                        initial_guesses=[],multi=False):
+                                        initial_guess=[],multi=False):
     """
     Append <num_synergistic_variables> variables in such a way that they are agnostic about any individual
     existing variable (one of self.numvariables thus) but have maximum MI about the set of self.numvariables
@@ -148,7 +151,6 @@ def append_synergistic_variables(self,parX,data,num_synergistic_variables,summed
 
     # in the new self, these indices will identify the synergistic variables that will be added
     synergistic_variables = range(len(self), len(self) + num_synergistic_variables)
-    # print("P3 UPPERBOUND",upper_bound_synergistic_information)
     
     def cost_func_subjects_only(free_params, parameter_values_before, extra_cost_rel_error=True):
         """
@@ -259,31 +261,24 @@ def append_synergistic_variables(self,parX,data,num_synergistic_variables,summed
     initial_guess = []
 
     if multi:
-        if initial_guesses:
-            initial_guess = [[init] for init in initial_guesses]
+        if initial_guess:
+            initial_guess = [[init] for init in initial_guess]
         else:
             initial_guess = [[[]] for _ in range(num_repeats)]
         optres,data = append_with_mpi([self,parX, pdf_subjects_snew, subject_variables,\
             agnostic_about, num_free_parameters,upper_bound_synergistic_information],num_repeats,initial_guess,data)
     else:
         for ix in range(num_repeats):
-            if not initial_guesses or ix >= len(initial_guesses):
+            if not initial_guess or ix >= len(initial_guess):
                 initial_guess = list(np.round(np.random.random(num_free_parameters),round_dec))
             else:
-                initial_guess = initial_guesses[ix]
-
-            time_before = time.time()
+                initial_guess = initial_guess[ix]
         
             optres_ix = minimize(cost_func_subjects_only,
                                     initial_guess,
                                     bounds=[(0.0, 1.0)]*num_free_parameters,
                                     # callback=(lambda xv: param_vectors_trace.append(list(xv))) if verbose else None,
                                     args=(parX,), method=minimize_method,options=minimize_options)
-                  
-            data['all_runtimes'][-1].append(time.time()-time_before)           
-            data['all_initials'][-1].append(list(initial_guess))
-            data['all_finals'][-1].append(list(optres_ix.x))
-            data['all_cost'][-1].append(optres_ix.fun)
 
             # make a conditional distribution of the synergistic variables conditioned on the subject variables
             # so that I can easily make a new joint pdf object with them and quantify this extra cost for the
@@ -301,7 +296,6 @@ def append_synergistic_variables(self,parX,data,num_synergistic_variables,summed
                 if frac_subjectsSnew > tol_nonsyn_mi_frac:
                     continue  # don't add this to the list of solutions
 
-            data['agn_fracs'].append(-1)
             if not tol_agn_mi_frac is None and not agnostic_about is None:
                 if len(agnostic_about) > 0:
 
@@ -320,29 +314,20 @@ def append_synergistic_variables(self,parX,data,num_synergistic_variables,summed
 
                     if agn_frac_subjectsSnew > tol_agn_mi_frac:
                         continue  # don't add this to the list of solutions
-                    data['agn_fracs'].append(agn_frac_subjectsSnew)
 
             optres_list.append(optres_ix)
-            data['tries'].append(ix)
-            data['srv_paths'].append([[initial_guess]+np.array(sim.list_callback_inp).tolist()])
 
         optres_list = [resi for resi in optres_list if resi.success]  # filter out the unsuccessful optimizations
 
         if len(optres_list) == 0:
             raise UserWarning('all ' + str(num_repeats) + ' optimizations using minimize() failed...?!')
 
-        optres_list = np.array([[data['tries'][i],resi] for i,resi in enumerate(optres_list) if resi.success])  # filter out the unsuccessful optimizations
-        data['srv_ids'] = list(optres_list[:,0])
         optres_list = list(optres_list[:,1])
         costvals = [res.fun for res in optres_list]
         min_cost = min(costvals)
         optres_ix = costvals.index(min_cost)
         optres = optres_list[optres_ix]
         assert optres_ix >= 0 and optres_ix < len(optres_list)
-
-        # only save entropy data of best srv and params of all found valid srvs
-        data['best_n'] = data['srv_ids'][optres_ix]
-        assert len(data['srv_paths']) == len(optres_list) # aka resi.success True if free params are valid
 
     assert len(optres.x) == num_free_parameters
     assert max(optres.x) <= 1.0000001, 'parameter bound significantly violated, ' + str(max(optres.x))
@@ -379,7 +364,7 @@ def append_synergistic_variables(self,parX,data,num_synergistic_variables,summed
 # todo: return not just a number but an object with more result information, which maybe if evaluated as
 # float then it will return the current return value
 def synergistic_information(self, variables_Y, variables_X,num_srvs=1,tol_nonsyn_mi_frac=0.05, verbose=False,
-                            summed_modulo=False,minimize_method=None, num_repeats_per_srv_append=1,\
+                            minimize_method=None, num_repeats_per_srv_append=1,\
                                 multi=False,all_initials=[]):
     pdf_with_srvs = self.copy()
     # TODO: improve the retrying of finding and adding srvs, in different orders?
@@ -388,17 +373,12 @@ def synergistic_information(self, variables_Y, variables_X,num_srvs=1,tol_nonsyn
     max_ent_per_var = np.log2(self.numvalues)  # max H(S)
     max_num_srv_add_trials = int(round(syn_entropy / max_ent_per_var * 2 + 0.5))  # heuristic
     # max_num_srv_add_trials = 2
-    # ent_X = d.entropy(variables_X)
 
     # get relevant data from synergistic information calculation
-    srv_keys = ['best_n','srv_ids','srv_paths','agn_fracs','tries']
-    all_keys = ['all_initials','all_finals','all_cost','all_runtimes']
+    srv_keys = ['try','I(X;S)','I(Y;S)','mi_fracs','agn_fracs']
     data = {}
-    for k in srv_keys+all_keys:
+    for k in srv_keys:
         data[k] = []
-    mutuals = ['I(X;S)','I(Y;S)','mi_fracs']
-    final_data = {k:[] for k in list(data.keys())+mutuals+['try']}
-    final_data['parXYSold'] = []
 
     # note: currently I constrain to add SRVs which consist each of only 1 variable each. I guess in most cases
     # this will work fine, but I do not know for sure that this will always be sufficient (i.e., does there
@@ -407,25 +387,16 @@ def synergistic_information(self, variables_Y, variables_X,num_srvs=1,tol_nonsyn
     total_syn_mi = 0
     for i in range(max_num_srv_add_trials):
         print("TRIAL ",i)
-        for r in data.keys():
-            if r in all_keys:
-                data[r].append([])
-            else:
-                data[r] = []
-
-        final_data['parXYSold'].append(list(matrix2params_incremental(pdf_with_srvs)))
-        final_data['try'].append(i)
         initial_guess = []
         if all_initials and i < len(all_initials):
             initial_guess = all_initials[i]
-        
         try:
             agnostic_about = range(len(self), len(pdf_with_srvs))  # new SRV must not correlate with previous SRVs
-            append_synergistic_variables(pdf_with_srvs,parX,data,num_srvs,summed_modulo=summed_modulo,\
+            append_synergistic_variables(pdf_with_srvs,parX,num_srvs,\
                                         subject_variables=variables_X,num_repeats=num_repeats_per_srv_append,\
                                         agnostic_about=agnostic_about,minimize_method=minimize_method,\
                                         tol_nonsyn_mi_frac=tol_nonsyn_mi_frac, tol_agn_mi_frac=tol_nonsyn_mi_frac,\
-                                        initial_guesses=initial_guess,multi=multi)
+                                        initial_guess=initial_guess,multi=multi)
         except UserWarning as e:
             assert 'minimize() failed' in str(e), 'only known reason for this error'
             warnings.warn(str(e) + '. Will now skip this sample in synergistic_information.')
@@ -448,12 +419,6 @@ def synergistic_information(self, variables_Y, variables_X,num_srvs=1,tol_nonsyn
                           'SRV was found, a good one, and now I will stop.')
 
                 total_syn_mi += new_syn_info
-                final_data['I(X;S)'].append(total_mi)
-                final_data['mi_fracs'].append(indiv_mi_list)  
-                for d in data.keys():
-                    if d not in all_keys:
-                        final_data[d].append(data[d])
-
             break  # assume that no more better SRVs can be found from now on, so stop (save time)
         else:
             if i == max_num_srv_add_trials - 1:
@@ -480,11 +445,6 @@ def synergistic_information(self, variables_Y, variables_X,num_srvs=1,tol_nonsyn
                         print('debug: agnostic=%s, agn. mi = %s (should be close to 0)' % (agnostic_about, agn_mi))
 
                 total_syn_mi += new_syn_info
-                final_data['I(X;S)'].append(total_mi)
-                final_data['mi_fracs'].append(indiv_mi_list)  
-                for d in data.keys():
-                    if d not in all_keys:
-                        final_data[d].append(data[d])
 
         if total_syn_mi >= syn_entropy * 0.99:
             if verbose:
@@ -504,10 +464,7 @@ def synergistic_information(self, variables_Y, variables_X,num_srvs=1,tol_nonsyn
 
     Si_mutualY = [pdf_with_srvs.mutual_information(variables_Y, [srv_id])
                     for srv_id in range(len(self), len(pdf_with_srvs))]
-    final_data['I(Y;S)'] = Si_mutualY
-    for a in all_keys:
-        final_data[a] = data[a]
-    return final_data
+    return pdf_with_srvs,sum(Si_mutualY)
 
 def synergistic_information_naive(self, variables_SRV, variables_X, return_also_relerr=False):
     """
@@ -734,3 +691,41 @@ def append_synvar_innerloop(args, minimize_method=None, minimize_options=None,
         data['srv_paths'] = []
 
     return [data, optres_ix]
+
+# VERSION2 COST FUNC SUBJECT
+def costfunc2(srvparams,jXS,lenJXS,parX,subjects,upper):
+    params2matrix_incremental(jXS,parX+list(srvparams))
+    totmi = jXS.mutual_information(subjects,[lenJXS-1])
+    indivmis = sum([jXS.mutual_information([i],[lenJXS-1]) for i in subjects])
+    cost=abs((upper-(totmi-indivmis))/upper)
+    if totmi != 0:
+        return cost+(indivmis/totmi)
+    else:
+        return cost+indivmis
+
+minimize_options = {'ftol': 1e-6}
+def symsyninfo(states,lenX,jX,syms,initialtype='first'):
+    subjects = list(range(lenX))
+    parX = matrix2params_incremental(jX)
+    upper = synergistic_entropy_upper_bound(jX)
+    jXS = append_random_srv(jX,parX,1)
+    lenJXS = len(jXS)
+    bestsymid=-1
+    # get initial guess of best sym
+    if initialtype!='random':
+        if initialtype=='first':
+            syms=[syms[0]]
+        pXSym,bestsymid = addbestsym(lenX,jX,upper,syms)
+        jXS.joint_probabilities.joint_probabilities = pXSym
+
+    freeparams = (states**(lenJXS))-(states**(len(jX)))
+    symparams = matrix2params_incremental(jXS)[-freeparams:]
+    optres_ix = minimize(costfunc2,
+                            symparams,
+                            bounds=[(0.0, 1.0)]*freeparams,
+#                             callback=(lambda xv: param_vectors_trace.append(list(xv))) if verbose else None,
+                            args=(jXS,lenJXS,parX,subjects,upper),options=minimize_options)
+    params2matrix_incremental(jXS,parX+list(optres_ix.x))
+    return bestsymid,jXS
+
+    

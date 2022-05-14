@@ -1,17 +1,12 @@
-from operator import sub
-from numba.cuda import test
 import numpy as np
 import warnings
-import time
-import itertools
 import copy
 import multiprocessing as mp
 
 from scipy.optimize import minimize
-from scipy.sparse import data
-from JointProbabilityMatrix import JointProbabilityMatrix, ConditionalProbabilityMatrix,ConditionalProbabilities
-from params_matrix import matrix2params_incremental,params2matrix_incremental
-from measures import append_variables_using_state_transitions_table,synergistic_entropy_upper_bound,synergistic_information_naive
+from .JointProbabilityMatrix import ConditionalProbabilityMatrix,ConditionalProbabilities
+from .params_matrix import matrix2params_incremental,params2matrix_incremental
+from .measures import append_variables_using_state_transitions_table,synergistic_entropy_upper_bound,synergistic_information_naive
 
 def append_synergistic_variables(self, num_synergistic_variables, initial_guess_summed_modulo=False, verbose=False,
                                     subject_variables=None, agnostic_about=None, num_repeats=3, minimize_method=None,
@@ -447,53 +442,8 @@ def append_independent_variables(self, joint_pdf):
 
     self.append_variables_using_conditional_distributions(ConditionalProbabilityMatrix({(): joint_pdf}))
 
-    def append_variables_with_target_mi(self, num_appended_variables, target_mi, relevant_variables='all',
-                                        verbose=False, num_repeats=None):
-
-        # input_variables = [d for d in xrange(self.numvariables) if not d in output_variables]
-
-        if relevant_variables in ('all', 'auto'):
-            relevant_variables = range(len(self))
-        else:
-            assert len(relevant_variables) <= len(self), 'cannot be relative to more variables than I originally had'
-            assert max(relevant_variables) <= len(self) - 1, 'relative to new variables...?? should not be'
-
-        if target_mi == 0.0:
-            raise UserWarning('you set target_mi but this is ill-defined: any independent variable(s) will do.'
-                              ' Therefore you should call append_independent_variables instead and specify explicitly'
-                              ' which PDFs you want to add independently.')
-
-        parameter_values_before = list(self.matrix2params_incremental())
-
-        pdf_new = self.copy()
-        pdf_new.append_variables(num_appended_variables)
-
-        assert pdf_new.numvariables == self.numvariables + num_appended_variables
-
-        parameter_values_after = pdf_new.matrix2params_incremental()
-
-        # this many parameters (each in [0,1]) must be optimized
-        num_free_parameters = len(parameter_values_after) - len(parameter_values_before)
-
-        def cost_func_target_mi(free_params, parameter_values_before):
-
-            assert np.all(np.isfinite(free_params)), 'looking for bug 23142'
-            # assert np.all(np.isfinite(parameter_values_before))  # todo: remove
-
-            pdf_new.params2matrix_incremental(list(parameter_values_before) + list(free_params))
-
-            mi = pdf_new.mutual_information(relevant_variables, range(len(self), len(pdf_new)))
-
-            return np.power((target_mi - mi) / target_mi, 2)
-
-        self.append_optimized_variables(num_appended_variables, cost_func=cost_func_target_mi,
-                                        initial_guess=np.random.random(num_free_parameters),
-                                        verbose=verbose, num_repeats=num_repeats)
-
-        return  # nothing, in-place
-
 def append_variables_with_target_mi(self, num_appended_variables, target_mi, relevant_variables='all',
-                                    verbose=False, num_repeats=None):
+                                    verbose=False, num_repeats=3):
 
     # input_variables = [d for d in xrange(self.numvariables) if not d in output_variables]
 

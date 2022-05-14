@@ -2,15 +2,17 @@ import numpy as np
 import itertools
 import pandas as pd
 import time
+import pickle
+import os
+import glob
+import dit
 from datetime import datetime
-from itertools import cycle, permutations, combinations
 from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix, ConditionalProbabilityMatrix
-
 lenX = 2
 
-"""
-Calculates all possible modulo random variables for a given number of states
-"""
+#############################
+# Calculates all possible modulo random variables for a given number of states
+#############################
 def exhaustive_search(args):
     first_rows = list(itertools.permutations(np.arange(args.states)))
 
@@ -44,7 +46,7 @@ def append_rows(srv,k=1):
         new_mods.append(temp)
     return new_mods
 
-# TODO optimize getting others list?
+# TODO optimize getting 'prevs' list srv[:k]?
 def all_rows(srv, k):
     s = len(srv)
     states = np.arange(s)
@@ -56,9 +58,9 @@ def all_rows(srv, k):
     valids = np.array([np.count_nonzero(np.bincount(a))==s for a in arr]) 
     return arr[np.where(valids)]
 
-"""
-Compute cycle types for n states (2 inputs)
-"""
+###############
+# Compute cycle types for n states (2 inputs)
+###############
 # https://stackoverflow.com/questions/400794/generating-the-partitions-of-a-number
 q = { 1: [[1]] }
 def decompose(n):
@@ -66,16 +68,13 @@ def decompose(n):
         return q[n]
     except:
         pass
-
     result = [[n]]
-
     for i in range(1, n):
         a = n-i
         R = decompose(i)
         for r in R:
             if r[0] <= a:
                 result.append([a] + r)
-
     q[n] = result
     return result
 
@@ -127,11 +126,11 @@ def get_all_cycles(N):
 
     return cycles
 
-"""
-Compute sudoku SRVs, i.e. SRVs for two input variables
-"""
-        
-def all_sudokus(states):
+############################################
+# Compute sudoku SRVs, i.e. SRVs for two input variables
+############################################
+def all_sudokus(args):
+    states=args.states
     cycles = get_all_cycles(states)
     r = np.arange(states)
     srvs = []
@@ -242,24 +241,21 @@ def check_cycle(old,new,old_ids,new_ids,states):
             return False
     return True
 
-
-"""
-Transform sudokus to SRVs and compute conditional entropy matrix between sudokus
-"""
-def cond_entropies(mods, args,noisy=False):
-    # from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix
-
+###################################################
+# Transform sudokus to SRVs and compute conditional entropy matrix between sudokus
+###################################################
+def cond_entropies(mods, args,cond=False):
     cond_mat = np.zeros((len(mods),len(mods)))
-
     subjects = np.arange(lenX)
     pX = JointProbabilityMatrix(lenX,args.states,joint_probs=args.dist_type)
+    print("TOT RVs",len(mods))
     for i in range(len(mods)):
         print(i, datetime.fromtimestamp(time.time()))
 
-        pXSi = append_srv(pX.copy(),mods[i],args, subjects, noisy)
+        pXSi = append_srv(pX.copy(),mods[i],args, subjects, cond)
         entSi = pXSi.entropy(variables=[lenX])
         for j in range(i+1,len(mods)):
-            pXS = append_srv(pXSi.copy(),mods[j],args, subjects, noisy)
+            pXS = append_srv(pXSi.copy(),mods[j],args, subjects, cond)
 
             entSj = pXS.entropy(variables=[lenX+1])     
             entS = pXS.entropy(variables=[lenX,lenX+1])
@@ -273,25 +269,24 @@ def cond_entropies(mods, args,noisy=False):
                         
     return cond_mat
 
-def append_srv(pX,srv,args,subjects,noisy=False):
-    # mod SRV to cond mat to ConditionalProbabilityMatrix Pr(S|X)
-    if noisy:
-        condmatrix = noisy_to_cond(srv,args)
+def append_srv(pX,srv,args,subjects,cond=False):
+    if cond:
+        condmatrix = mat_to_cond(srv,args.states,args.lenX)
     else:
         matrix = srv_to_mat(srv, args.states,args.lenX)
-        condmatrix = mat_to_cond(matrix,args)
+        condmatrix = mat_to_cond(matrix,args.states,args.lenX)
 
     # cond to Pr(XS)
     pX.append_variables_using_conditional_distributions(condmatrix, subjects)
     return pX
 
-def mat_to_cond(matrix, args):
+def mat_to_cond(matrix, states,lenX):
     # get list of all possible input states
-    input_values = list(itertools.product(*[np.arange(args.states) for _ in range(args.lenX)]))
+    input_values = list(itertools.product(*[np.arange(states) for _ in range(lenX)]))
 
     cmatrix = ConditionalProbabilityMatrix()
     for i,row in enumerate(matrix):
-        pdummy = JointProbabilityMatrix(1, args.states)
+        pdummy = JointProbabilityMatrix(1, states)
         pdummy.joint_probabilities.joint_probabilities = row
         cmatrix.cond_pdf[input_values[i]] = pdummy
     return cmatrix
@@ -312,13 +307,6 @@ def srv_to_mat(srv, states, lenX, p=0):
 
     return cond_mat
 
-def noisy_to_cond(srv,args):
-    srv = np.array(srv)
-    shape = srv.shape
-    mat = srv.reshape((shape[1]*shape[2],shape[0]))
-    cmatrix = mat_to_cond(mat,args)
-    return cmatrix
-
 def group_by_cond(mat):
     labels = np.arange(len(mat))
     groups = {l:[l] for l in labels}
@@ -332,4 +320,155 @@ def group_by_cond(mat):
                     groups[labels[i]] = new_group
                     labels[[i,j]] = labels[i]
     return groups
+
+###############
+# COMPUTE LOWER-ORDER & OVERSIZED SUDOKUS
+###############
+def all_lowerorder_sudokus(args):
+    # load all MSRVs with M < args.states
+    sudokus, combs = sudokus_combs(args.states,args.folder)
+    noisies = []
+    M = args.states
+    for i,c in enumerate(combs):
+        # print(i)
+        curlen = len(c)
+        cursudos = sudokus[curlen]
+        permutations = list(itertools.permutations(c))
+        for c in cursudos:
+            for p in permutations:
+                unimat = np.full((M,M,M),1/M)
+                for i in range(curlen):
+                    for j in range(curlen):
+                        cur = unimat[p[i]][p[j]]
+                        cur[list(p)] = 0
+                        cur[p[int(c[i][j])]] = curlen/M
+                        unimat[p[i]][p[j]] = cur
+                noisies.append(unimat.reshape(M*M,M))
+    return np.array(noisies)
+
+def sudokus_combs(states,folder):
+    allfiles = np.array([name for name in list(glob.iglob(folder+"*.pkl")) if 'permutation' in name])
+    allsudokus = {}
+    combs = []
+    for a in allfiles:
+        cur = int(a[-5])
+        if cur < states:
+            with open(a, 'rb') as f:
+                allsudokus[cur] = pickle.load(f)
+                combs = combs + list(itertools.combinations(np.arange(states), cur))
+    return allsudokus, combs
+
+def exhaustive_noisy(args,Msudo=0):
+    with open(args.folder+'permutation_sudokus_states'+str(args.states)+'.pkl', 'rb') as f:
+        sudokus = pickle.load(f)
+    M = len(sudokus[0])
+    if Msudo == 0:
+        Msudo = M
+    adjusted = []
+    for s in sudokus:
+        condsym,reshaped = reshapesym(s,M,Msudo)
+        adjusted = adjusted + get_noisies(reshaped,M,Msudo)
+    return np.array(adjusted)
+def reshapesym(s,M,Msudo=0):
+    shape = list(s.shape)
+    condsym = np.zeros(tuple(shape+[Msudo]))
+    for i in range(M):
+        for j in range(M):
+            condsym[i,j][int(s[i,j])] += 1
+    reshaped = condsym.reshape((M*M,Msudo))
+    return condsym,reshaped
+
+def get_noisies(reshaped,M,Msudo):
+    adjusted = []
+    r = np.arange(M*M)
+    uni = np.zeros(Msudo)+(1/Msudo)
+    for k in range(1,M*M):
+        c = list(itertools.combinations(r,k))
+        for combs in c:
+            cur = reshaped.copy()
+            for comb in combs:
+                cur[comb] = uni
+            adjusted.append(cur)
+    return adjusted
+
+def getcond(nsym):
+    symstates = len(nsym[0])
+    b = np.not_equal([1/symstates], nsym)
+    yesrows = np.unique(np.where(b)[0])
+    return nsym[yesrows]
+
+# COMPUTE OVERSIZED SYMS
+def oversizedsyms(gs,syms):
+    ns = []
+    for k,noisies in syms.items():
+        uni = [1/k for _ in range(k)]
+        totlen = k*k
+        for n in noisies:
+            if totlen-len(np.where(np.all(n==uni,axis=1))[0])==(gs*gs):
+                ns.append(n)
+    nsym = [getcond(i) for i in ns]
+    return nsym
+
+class Namespace:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)   
+
+def oversizedtodit(s,goalstate,lenX=2):
+    args = Namespace(lenX=2,states=goalstate) 
+    pX = JointProbabilityMatrix(2,goalstate,joint_probs='iid')
+    prX = pX.joint_probabilities.joint_probabilities
     
+    ls = np.arange(args.states)
+    lensym = len(s[0])
+    inpstates=list(itertools.product(*[ls,ls]))
+    s = s.reshape((args.states,args.states,lensym))
+    z = []
+    for i in inpstates:
+        z.append(s[i]*prX[i])
+    z = np.array(z).reshape((goalstate,goalstate,lensym))
+    return dit.Distribution.from_ndarray(z)
+
+# LOAD & SORT SYMS
+def load_sudokus(states=2):
+    os.chdir("../results/sudokus")
+    allfiles = glob.glob("*.npy")
+    filename = None
+    for file in allfiles:
+        if 'constructedSRVstates'+str(states)+'.npy' in file:
+            filename = file
+            # load symSRVs for number of states
+            with open(file, 'rb') as f:
+                syms = np.load(f,allow_pickle=True)
+
+    os.chdir("../../code")
+    return syms
+
+def classify_syms(syms,states):
+    classes = {}
+    for i in range(len(syms)):
+        cur = syms[i]
+        unqs = np.unique(cur)
+        lc = len(cur[0])
+        if lc == states:
+            try:
+                b = (unqs==np.arange(states)).all()
+                if 1/states not in unqs:
+                    classes[i] = 'full sym'
+                elif 1-(1/states) in unqs:
+                    classes[i] = 'lower order sym'
+                else:
+                    classes[i] = 'noisy sym'
+            except AttributeError as err:
+                if 1/states not in unqs:
+                    classes[i] = 'full sym'
+                elif 1 not in unqs:
+                    classes[i] = 'noisy sym'
+                else:
+                    classes[i] = 'lower order sym'
+        elif lc>states:
+            classes[i] = 'oversized states '+str(lc)
+    classvals = list(classes.values())
+    invclasses = {k:[] for k in np.unique(classvals)}
+    for i, c in enumerate(classvals):
+        invclasses[c].append(i)
+    return classvals, invclasses

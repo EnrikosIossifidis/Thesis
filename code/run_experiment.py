@@ -1,16 +1,12 @@
 import re
 import os
-import glob
 import os.path
 import argparse
 import subprocess
-import sys
-import time
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import itertools
-from operator import mod
 from distutils.util import strtobool
 
 def getcodes(code1,code2):
@@ -89,6 +85,7 @@ if __name__ == '__main__':
      parser.add_argument('--code1', default='run_jointpdfp2.py', help='Original (python2) way of calculating synergy')
      parser.add_argument('--code2', default='run_syndisc.py', help='New (python3) way of calculating synergy')
      parser.add_argument('--save', default='True', help='Save JSONs')
+     parser.add_argument('--sort', default=True,type=lambda x: bool(strtobool(x)), help='Sort all experiments by system and run (not necessary for 1 run)')
      parser.add_argument('--save_df', default=True,type=lambda x: bool(strtobool(x)), help='Save all experiments in one DataFrame')
      parser.add_argument('--plot', default=True,type=lambda x: bool(strtobool(x)), help='Scatterplot of results of experiments')
 
@@ -134,8 +131,8 @@ if __name__ == '__main__':
           if p3:
                last = last + (last*len(model_strings)*len(p3model_strings))
           print('tot last files',last)
-          d = get_data(args,last)
-          d = swithcols(['exp_sort','tot_repeats','systemID','syn_upper','lenS','srv_data'],d)
+          d = get_data(args,last=last,sort=args.sort)
+          d = swithcols(['exp_sort','systemID','syn_upper','shapeS','srv_data'],d)
           print(d)
           args.exp = args.dist_type+'states'+str(args.states)+'.pkl'
           d.to_pickle(args.folder+args.exp)
