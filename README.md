@@ -26,18 +26,21 @@ The code includes python scripts to:
 * Python 2 and Python 3 must be supported. Additionally, to run *run_syndiscjointpdf.py* with *run_syndisc.py* and *run_jointpdfp2.py*, Anaconda must be installed where the Python 3 Anaconda environment is named '*base*' and the Python 2 environment '*python2*'. 
 * Standard Python packages such as *numpy, pandas, matplotlib, scipy*, etc.
 * Additionally packages for the optimization procedure in syndisc must be installed such as *dit, networkx, pypoman, cvxopt*
-* An overview of all used packages and imports are listed in setup.py.
+* An overview of all used packages and imports are listed in listofimports.py.
  
 ### Executing programs
-
-* How to run the program
-* Step-by-step bullets
+Examples of how to run codes involving *args*
+* How to run *run_sudokus.py*:
 ```
-code blocks for commands
+python run_sudokus.py --states=2 --runtype=lowerorders --folder=../results/test/
 ```
-
+* How to run *run_syndisc.py*:
+```
+python run_syndisc.py --states=4 --systems=3 --dist_type=iid
+```
+* How to run *run_syndiscjointpdf.py* (ex. only run experiments for jointpdf Python 3):
+```
+python run_syndisc.py --states=3 --systems=10 --n_repeats=1,3,5 --code1=run_jointpdfp3.py --code2=''
+```
 ## Authors
-
-Contributors names and contact info
-
-Enrikos Iossifidis
+Enrikos Iossifidis (linkedin.com/in/enrikos-iossifidis-9286b0113)
