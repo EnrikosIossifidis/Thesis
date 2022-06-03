@@ -122,7 +122,6 @@ if __name__ == '__main__':
     parser.add_argument('--lenY', default=1,type=int, help='Number of input variables Y') 
     parser.add_argument('--states', default=2,type=int, help='Number of states for each random variable')
     parser.add_argument('--dist_type', default='dirichlet', help='Distribution type')
-    parser.add_argument('--num_srvs', default=1,type=int, help='Number of SRVs to search for during one search')
 
     # run parameters
     parser.add_argument('--systems', default=1,type=int, help='Number of different system distribution pXY')
