@@ -11,8 +11,8 @@ An in-depth paragraph about your project and overview of use.
 ### Dependencies
 
 * Python 2 and Python 3 must be supported
-* Standard Python packages such as *numpy, pandas, matplotlib, scipy, etc.
-* Additionally packages for the optimization procedures such as *dit, networkx, pypoman, cvxopt
+* Standard Python packages such as *numpy, pandas, matplotlib, scipy*, etc.
+* Additionally packages for the optimization procedures such as *dit, networkx, pypoman, cvxopt*
 
 ### Executing programs
 
