@@ -29,7 +29,7 @@ The code includes python scripts to:
 * An overview of all used packages and imports are listed in listofimports.py.
  
 ### Executing programs
-Examples of how to run codes involving *args*
+Examples of how to run codes involving *args*, with root in the *code* folder.
 * How to run *run_sudokus.py*:
 ```
 python run_sudokus.py --states=2 --runtype=lowerorders --folder=../results/test/
