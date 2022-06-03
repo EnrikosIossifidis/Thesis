@@ -1,6 +1,6 @@
-# Project Title
+# Code Master Thesis 'Understanding synergistic information using constructed SRVs'
 
-Simple overview of use/purpose.
+This is the code implementation (code) to generate the data (results) and plots (code/plot_notebooks) in the Master Thesis 'Understanding synergistic information using constructed SRVs'. 
 
 ## Description
 
