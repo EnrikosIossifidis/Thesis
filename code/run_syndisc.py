@@ -6,14 +6,32 @@ from dit import Distribution
 import numpy as np
 import argparse
 from distutils.util import strtobool
-
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 from syndisc.syndisc import disclosure_channel,self_disclosure_channel
 from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix
 from jointpdfpython3.params_matrix import params2matrix_incremental, matrix2params_incremental
 from jointpdfpython3.measures import synergistic_entropy_upper_bound
 
 def run_syndisc(d):
+    """
+    Compute for the given args the synergistic information (syn info) using syndisc. 
+    The data of all random systems is saved as a JSON file.
+
+    Parameters
+    ----------
+    d: dictionary with model parameters to run (number of systems, states, etc.)
+
+    Returns
+    -------
+    d: dictionary with computed synergistic information, the found SRV S,
+    entropy H(S), I(Xi;S), I(X;S), etc.
+    """
+
     args = vars(d['args'])
+    
+    # load previous args and systems if available
     prev = None
     load_pars = False
     if d['args'].prev:
@@ -28,8 +46,11 @@ def run_syndisc(d):
     variables_X = np.arange(args['lenX'])
     variables_Y = np.arange(args['lenX'],tot_vars)
     p_XY = JointProbabilityMatrix(tot_vars,args['states'])
+
+    # compute syn info and srv data for random systems
     for i in range(args['systems']):
         d['data']['systemID'].append(i)
+
         # generate or load Pr(XY)
         if load_pars:
             params2matrix_incremental(p_XY,prev_pars[i])
@@ -44,7 +65,6 @@ def run_syndisc(d):
             else:
                 p_XY.generate_uniform_joint_probabilities(tot_vars,args['states'])
             cur = synergistic_entropy_upper_bound(p_XY[variables_X])
-        d['data']['syn_upper'].append(cur)
 
         # (time) calculation of self-synergy
         d['data']['parXY'].append(list(matrix2params_incremental(p_XY)))
@@ -64,6 +84,7 @@ def run_syndisc(d):
             d['data']['tot_runtime'].append(time.time()-before)
 
         d['data']['syn_info'].append(syn) # if lenY=0 then I(Y;S)=I(X;S)
+        d['data']['syn_upper'].append(cur)
 
         # calculate I(Xi;SRV) for all Xi
         x = p_XY[variables_X].joint_probabilities.joint_probabilities.flatten()
@@ -108,8 +129,8 @@ if __name__ == '__main__':
     parser.add_argument('--prev', default=None,type=lambda x: None if x == 'None' else x, help='Previous data to load in')
     parser.add_argument('--exp', default=0,type=int, help='Experiment ID')
     parser.add_argument('--save', default=True,type=lambda x: bool(strtobool(x)), help='Save run as json or not')
-    parser.add_argument('--folder', default="../results/", help='Folder in which data is saved')
-    parser.add_argument('--rowfolder', default="/row_data/", help='Folder in which each single run is saved')
+    parser.add_argument('--folder', default="../results/test/", help='Folder in which data is saved')
+    parser.add_argument('--plot', default=False)
 
     args = parser.parse_args()
     d = {'data':{'systemID':[],'pX':[],'parXY':[],'syn_upper':[],'H(Xi)':[],'I(X1;X2)':[],'runID':[],
@@ -126,6 +147,15 @@ if __name__ == '__main__':
         while any(filename_beg+str(args.exp)+filename_end in x for x in files):
             args.exp += 1
         filename = filename_beg+str(args.exp)+filename_end
-        print(d['args']['folder']+filename)
         with open(d['args']['folder']+filename,'w') as fp:
             json.dump(d,fp)
+
+    if args.plot:
+        ds = {}
+        for k in d['data'].keys():
+            if len(d['data'][k])>0:
+                ds[k] = d['data'][k]
+        d = pd.DataFrame(data=ds)
+        fig, ax = plt.subplots(figsize=(14,8))        
+        sns.scatterplot(data=d, x='tot_runtime', y='syn_info', hue='systemID',palette='tab10',s=100,ax=ax)
+        plt.show()

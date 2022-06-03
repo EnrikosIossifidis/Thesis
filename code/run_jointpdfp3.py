@@ -3,7 +3,6 @@ import json
 import argparse
 import numpy as np
 import glob
-import os
 from distutils.util import strtobool
 from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix
 
@@ -11,7 +10,20 @@ from jointpdfpython3.params_matrix import params2matrix_incremental, matrix2para
 from jointpdfpython3.measures import synergistic_information, synergistic_entropy_upper_bound
 
 def run_jpdf(args,d):
+    """
+    Compute for the given args the synergistic information (syn info) using jointpdf. 
+    The data of all random systems is saved as a JSON file.
 
+    Parameters
+    ----------
+    d: dictionary with model parameters to run (number of systems, states, etc.)
+
+    Returns
+    -------
+    d: dictionary with computed synergistic information, the found SRV S,
+    entropy H(S), I(Xi;S), I(X;S), etc.
+    """
+    # load previous systems if available
     prev = None
     if args.prev:
         with open(args.folder+args.prev) as file:
@@ -19,10 +31,13 @@ def run_jpdf(args,d):
             prev_pars = prev['data']['parXY']
 
     tot_vars = args.lenX + args.lenY
+    p_XY = JointProbabilityMatrix(tot_vars,args.states)
     variables_X = np.arange(args.lenX)
     variables_Y = np.arange(args.lenX,tot_vars)
+    if args.lenY == 0:
+        variables_Y = variables_X
 
-    p_XY = JointProbabilityMatrix(tot_vars,args.states)
+    # compute syn info and srv data for random systems
     for i in range(args.systems):
         print("CUR NUM",i)
         # generate or load Pr(XY)c
@@ -36,39 +51,34 @@ def run_jpdf(args,d):
                 p_XY.generate_uniform_joint_probabilities(tot_vars,args.states)
             d['data']['syn_upper'].append(synergistic_entropy_upper_bound(p_XY[variables_X]))
         
-        print(d['data']['syn_upper'][-1])
-        curparams = list(matrix2params_incremental(p_XY))
-
         d['data']['systemID'].append(i)
-        d['data']['parXY'].append(curparams)
+        d['data']['pX'].append(list(p_XY[variables_X].joint_probabilities.joint_probabilities.flatten()))
+        d['data']['parXY'].append(list(matrix2params_incremental(p_XY)))
         d['data']['I(X1;X2)'].append(p_XY.mutual_information([0],[1]))
-            
-        before = time.time()
+        d['data']['H(Xi)'].append([p_XY.entropy([i]) for i in variables_X])
 
-        # TO DO: Gelijk IYS, IXS, pXS,.. opslaan in jointpdf run
-        syn,p_XYS = synergistic_information(p_XY,variables_Y,variables_X,tol_nonsyn_mi_frac=args.tol
+        # compute syn info
+        before = time.time()
+        p_XYS,syn = synergistic_information(p_XY,variables_Y,variables_X,tol_nonsyn_mi_frac=args.tol
                                 ,minimize_method=args.mm,num_repeats_per_srv_append=args.n_repeats,
                                 initial_guess_summed_modulo=args.summed_modulo,verbose=False)
         d['data']['tot_runtime'].append(time.time()-before)
-        d['data']['I(Y;S)'].append([syn])
+        d['data']['syn_info'].append(syn)
 
+        # save data of each srv for system i
+        entS = 0
+        totmi = 0
+        indivmi = 0
+        pfinal = []
         synvars = list(np.arange(tot_vars,len(p_XYS)))
-        d['data']['lenS'].append(len(synvars))
-        srv_entropy = 0
-        indiv_mutuals = []
-
         if len(synvars)>0:
             for svar in range(len(synvars)):
-                srv_entropy = p_XYS.entropy(variables=[tot_vars+svar])   
-                indiv_mutuals = [p_XYS.mutual_information([i],[tot_vars+svar]) for i in variables_X]
-                tot_mutual = p_XYS.mutual_information(variables_X,[tot_vars+svar])
-                d['data']['H(S)'].append(srv_entropy)
-                d['data']['I(Xi;S)'].append(indiv_mutuals)
-                d['data']['I(X;S)'].append(tot_mutual)
-
-            pXS = p_XYS[list(variables_X)+synvars].joint_probabilities.joint_probabilities.flatten()
-            d['data']['pXS'].append(list(pXS))
-            
+                entS += p_XYS.entropy(variables=[tot_vars+svar])
+                totmi += p_XYS.mutual_information(variables_X,[tot_vars+svar])
+                indivmi += sum([p_XYS.mutual_information([i],[tot_vars+svar]) for i in variables_X])
+            pfinal = list(p_XYS.joint_probabilities.joint_probabilities.flatten())
+        d['data']['srv_data'].append([entS,totmi,indivmi,pfinal])
+        d['data']['shapeS'].append(p_XYS.joint_probabilities.joint_probabilities.shape)
     d['args'] = vars(args)
     return d
 
@@ -89,6 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--tol', default=0.05,type=float, help='Fraction of tolerated individual mutual information')
     parser.add_argument('--mm', default=None, type=lambda x: None if x == 'None' else x,help='Scipy optimize minimize minimization method')
     parser.add_argument('--summed_modulo', default=False,type=lambda x: bool(strtobool(x)), help='Start with parity SRV or not')
+    parser.add_argument('--no_test', default=False,type=lambda x: bool(strtobool(x)), help='Turn of assertions during optimization')
     # run parameters
     parser.add_argument('--all_initials', default=False,type=lambda x: bool(strtobool(x)), help='Start with all previous initial guess')
     parser.add_argument('--systems', default=3,type=int, help='Number of different system distribution pXY')
@@ -100,14 +111,13 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     
-    # print("DEBUG",__debug__)
-    d = {'data':{'systemID':[], 'parXY':[],'syn_upper':[],'I(X1;X2)':[],'runID':[],
-            'pXS':[],'lenS':[],'H(S)':[],'I(Y;S)':[],'I(X;S)':[],'I(Xi;S)':[],'tot_runtime':[]}}
+    d = {'data':{'systemID':[],'pX':[],'parXY':[],'syn_upper':[],'H(Xi)':[],'I(X1;X2)':[],'runID':[],
+            'shapeS':[],'tot_runtime':[],'syn_info':[],'srv_data':[]}}
 
     d = run_jpdf(args,d)
 
     if args.save:
-        filename_beg = 'python2_exp'
+        filename_beg = 'python3_exp'
         filename_end = args.dist_type+'_States'+str(args.states)+'.json'
         files = glob.glob(args.folder+"*.json")
         while any(filename_beg+str(args.exp)+filename_end in x for x in files):

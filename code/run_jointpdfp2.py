@@ -7,7 +7,20 @@ from distutils.util import strtobool
 from jointpdf_original.jointpdf import JointProbabilityMatrix
 
 def run_jpdf(args,d):
-    # args = vars(d['args'])
+    """
+    Compute for the given args the synergistic information (syn info) using jointpdf. 
+    The data of all random systems is saved as a JSON file.
+
+    Parameters
+    ----------
+    d: dictionary with model parameters to run (number of systems, states, etc.)
+
+    Returns
+    -------
+    d: dictionary with computed synergistic information, the found SRV S,
+    entropy H(S), I(Xi;S), I(X;S), etc.
+    """
+    # load previous systems if available
     prev = None
     if args.prev:
         with open(args.folder+args.prev) as file:
@@ -15,12 +28,13 @@ def run_jpdf(args,d):
             prev_pars = prev['data']['parXY']
 
     tot_vars = args.lenX + args.lenY
+    p_XY = JointProbabilityMatrix(tot_vars,args.states)
     variables_X = np.arange(args.lenX)
     variables_Y = np.arange(args.lenX,tot_vars)
     if args.lenY == 0:
         variables_Y = variables_X
 
-    p_XY = JointProbabilityMatrix(tot_vars,args.states)
+    # compute syn info and srv data for random systems
     for i in range(args.systems):
         print("CUR NUM",i,time.strftime("%H:%M:%S", time.localtime()))
         # generate or load Pr(XY)c
@@ -40,6 +54,7 @@ def run_jpdf(args,d):
         d['data']['I(X1;X2)'].append(p_XY.mutual_information([0],[1]))
         d['data']['H(Xi)'].append([p_XY.entropy([i]) for i in variables_X])
 
+        # compute syn info
         before = time.time()
         syn,p_XYS = p_XY.synergistic_information(variables_Y,variables_X,tol_nonsyn_mi_frac=args.tol
                                 ,minimize_method=args.mm,num_repeats_per_srv_append=args.n_repeats,
@@ -47,13 +62,12 @@ def run_jpdf(args,d):
         d['data']['tot_runtime'].append(time.time()-before)
         d['data']['syn_info'].append(syn)
 
-        # # calculate I(Xi;SRV) for all Xi
-        synvars = list(np.arange(tot_vars,len(p_XYS)))
-
+        # save data of each srv for system i
         entS = 0
         totmi = 0
         indivmi = 0
         pfinal = []
+        synvars = list(np.arange(tot_vars,len(p_XYS)))
         if len(synvars)>0:
             for svar in range(len(synvars)):
                 entS += p_XYS.entropy(variables=[tot_vars+svar])
@@ -88,12 +102,11 @@ if __name__ == '__main__':
     parser.add_argument('--prev', default=None,type=lambda x: None if x == 'None' else x, help='Previous data to load in')
     parser.add_argument('--exp', default=0,type=int, help='Experiment ID')
     parser.add_argument('--save', default=True,type=lambda x: bool(strtobool(x)), help='Save run as json or not')
-    parser.add_argument('--folder', default="../results/", help='Folder in which data is saved')
-    parser.add_argument('--rowfolder', default="/row_data/", help='Folder in which each single run is saved')
+    parser.add_argument('--folder', default="../results/test/", help='Folder in which data is saved')
+    parser.add_argument('--plot', default=False)
 
     args = parser.parse_args()
     
-    # print("DEBUG",__debug__)
     d = {'data':{'systemID':[],'pX':[],'parXY':[],'syn_upper':[],'H(Xi)':[],'I(X1;X2)':[],'runID':[],
             'shapeS':[],'tot_runtime':[],'syn_info':[],'srv_data':[]}}
 
@@ -108,3 +121,4 @@ if __name__ == '__main__':
         filename = filename_beg+str(args.exp)+filename_end
         with open(args.folder+filename,'w') as fp:
             json.dump(d,fp)
+    
