@@ -26,7 +26,7 @@ The code includes python scripts to:
 * Python 2 and Python 3 must be supported. Additionally, to run *run_syndiscjointpdf.py* with *run_syndisc.py* and *run_jointpdfp2.py*, Anaconda must be installed where the Python 3 Anaconda environment is named '*base*' and the Python 2 environment '*python2*'. 
 * Standard Python packages such as *numpy, pandas, matplotlib, scipy*, etc.
 * Additionally packages for the optimization procedure in syndisc must be installed such as *dit, networkx, pypoman, cvxopt*
-* An overview of all used packages and imports are listed in setup.py.
+* An overview of all used packages and imports are listed in listofimports.py.
  
 ### Executing programs
 Examples of how to run codes involving *args*
