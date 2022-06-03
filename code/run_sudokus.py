@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from distutils.util import strtobool
 from helpers.group_helpers import all_sudokus, exhaustive_search, cond_entropies, all_oversized,\
-                                group_by_cond, all_lowerorder_sudokus, all_noisies, append_srv
+                                group_by_cond, all_lowerorder_sudokus, all_noisies
 
 def loadrun(args,filename,f):
     # load selected type of SRVs

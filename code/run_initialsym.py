@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import dit
 from dit import Distribution
 from distutils.util import strtobool
+from helpers.group_helpers import loadsyms, classifylowerorders, classifyoversized
 from jointpdfpython3.JointProbabilityMatrix import JointProbabilityMatrix
 from jointpdfpython3.params_matrix import matrix2params_incremental, params2matrix_incremental
 from jointpdfpython3.measures import synergistic_entropy_upper_bound,symsyninfo
@@ -109,8 +110,24 @@ if __name__ == '__main__':
         'I(Xi;optimizedsym)':[],'H(optimizedsym)':[],'H(optimizedsym|initialsym)':[],'bestsymid':[]}
 
     # Load all (relevant) constructed srvs given number of states
-    with open('../results/sudokus/constructedSRVstates'+str(args.states)+'.npy', 'rb') as f:
-        syms = np.load(f,allow_pickle=True)
+    concsyms, syms = loadsyms(args.states)
+    syms = classifyoversized(syms,args.states)
+    if 'lower order' in syms.keys():
+        syms = classifylowerorders(args.states,syms)
+
+    # get indexes of all non-oversized SRVs
+    listsyms = []
+    symids = {}
+    previd = 0
+    newsyms = {}
+    for k in syms.keys():
+        if 'oversized' not in k:
+            newsyms[k] = syms[k]
+            for s in syms[k]:
+                listsyms.append(s)
+                symids[k] = np.arange(previd,previd+len(syms[k]))
+            previd = previd+len(syms[k])
+    syms = listsyms
     print(syms,len(syms))
     if args.run:
         d = run_syndisc(args,d,syms)
