@@ -29,15 +29,18 @@ The code includes python scripts to:
 * An overview of all used packages and imports are listed in setup.py.
  
 ### Executing programs
-
-* How to run the program
-* Step-by-step bullets
+Examples of how to run codes involving *args*
+* How to run *run_sudokus.py*:
 ```
-code blocks for commands
+python run_sudokus.py --states=2 --runtype=lowerorders --folder=../results/test/
 ```
-
+* How to run *run_syndisc.py*:
+```
+python run_syndisc.py --states=4 --systems=3 --dist_type=iid
+```
+* How to run *run_syndiscjointpdf.py* (ex. only run experiments for jointpdf Python 3):
+```
+python run_syndisc.py --states=3 --systems=10 --n_repeats=1,3,5 --code1=run_jointpdfp3.py --code2=''
+```
 ## Authors
-
-Contributors names and contact info
-
-Enrikos Iossifidis
+Enrikos Iossifidis (linkedin.com/in/enrikos-iossifidis-9286b0113)
