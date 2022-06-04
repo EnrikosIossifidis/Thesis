@@ -46,4 +46,4 @@ python run_syndisc.py --states=4 --systems=3 --dist_type=iid
 python run_syndisc.py --states=3 --systems=10 --n_repeats=1,3,5 --code1=run_jointpdfp3.py --code2=''
 ```
 ## Authors
-Enrikos Iossifidis (linkedin.com/in/enrikos-iossifidis-9286b0113)
+Enrikos Iossifidis (https://www.linkedin.com/in/enrikos-iossifidis-9286b0113/)
