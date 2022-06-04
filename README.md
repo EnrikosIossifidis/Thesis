@@ -29,7 +29,8 @@ The code includes python scripts to:
 * An overview of all used packages and imports are listed in listofimports.py.
  
 ### Executing programs
-Examples of how to run codes involving *args*, with root in the *code* folder.
+Examples of how to run codes involving *args*, with root in the *code* folder. Note that the results are saved in the results/test folder. The large datasets with random X and computed SRVs are already saved in each results' folder.
+
 * First, download the whole folder and unzip *zippedsrvs* in the folder *results/sudokus*.
 
 * How to run *run_sudokus.py*:
